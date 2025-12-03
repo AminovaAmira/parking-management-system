@@ -38,13 +38,14 @@ async def health_check():
     }
 
 
-# TODO: Import and include routers
-# from app.api.endpoints import auth, customers, vehicles, zones, bookings, sessions, payments
+# Import routers
+from app.api.endpoints import auth, vehicles, zones, bookings, sessions, payments, ocr
 
-# app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-# app.include_router(customers.router, prefix="/api/customers", tags=["Customers"])
-# app.include_router(vehicles.router, prefix="/api/vehicles", tags=["Vehicles"])
-# app.include_router(zones.router, prefix="/api/zones", tags=["Parking Zones"])
-# app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])
-# app.include_router(sessions.router, prefix="/api/sessions", tags=["Parking Sessions"])
-# app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
+# Include routers
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(vehicles.router, prefix="/api/vehicles", tags=["Vehicles"])
+app.include_router(zones.router, prefix="/api/zones", tags=["Parking Zones"])
+app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["Parking Sessions"])
+app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
+app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR - License Plate Recognition"])

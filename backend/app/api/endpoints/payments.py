@@ -1,0 +1,323 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from typing import List
+from uuid import UUID
+from decimal import Decimal
+
+from app.db.database import get_db
+from app.models.customer import Customer
+from app.models.vehicle import Vehicle
+from app.models.payment import Payment
+from app.models.parking_session import ParkingSession
+from app.models.parking_spot import ParkingSpot
+from app.models.parking_zone import ParkingZone
+from app.models.tariff_plan import TariffPlan
+from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
+from app.core.dependencies import get_current_customer
+
+router = APIRouter()
+
+
+def calculate_parking_cost(session: ParkingSession, tariff: TariffPlan) -> Decimal:
+    """Calculate parking cost based on session duration and tariff"""
+    if not session.exit_time:
+        raise ValueError("Session must have exit time to calculate cost")
+
+    duration = session.exit_time - session.entry_time
+    hours = Decimal(duration.total_seconds()) / Decimal(3600)
+
+    # Round up to nearest hour
+    hours = hours.quantize(Decimal('1'), rounding='ROUND_UP')
+
+    # Calculate cost
+    if tariff.price_per_day and hours >= 24:
+        # Use daily rate if available and duration is 24+ hours
+        days = (hours / Decimal(24)).quantize(Decimal('1'), rounding='ROUND_UP')
+        cost = days * tariff.price_per_day
+    else:
+        # Use hourly rate
+        cost = hours * tariff.price_per_hour
+
+    return cost.quantize(Decimal('0.01'))
+
+
+@router.get("/", response_model=List[PaymentResponse])
+async def get_my_payments(
+    current_customer: Customer = Depends(get_current_customer),
+    status: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all payments for current customer"""
+    stmt = select(Payment).where(Payment.customer_id == current_customer.customer_id)
+
+    if status:
+        stmt = stmt.where(Payment.status == status)
+
+    stmt = stmt.order_by(Payment.created_at.desc())
+
+    result = await db.execute(stmt)
+    payments = result.scalars().all()
+    return payments
+
+
+@router.post("/", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
+async def create_payment(
+    payment_data: PaymentCreate,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new payment for a parking session"""
+
+    # Get parking session
+    stmt = select(ParkingSession).where(ParkingSession.session_id == payment_data.session_id)
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parking session not found"
+        )
+
+    # Verify session belongs to customer's vehicle
+    stmt = select(Vehicle).where(
+        Vehicle.vehicle_id == session.vehicle_id,
+        Vehicle.customer_id == current_customer.customer_id
+    )
+    result = await db.execute(stmt)
+    vehicle = result.scalar_one_or_none()
+
+    if not vehicle:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Session does not belong to your vehicle"
+        )
+
+    # Check if session is completed
+    if session.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only create payment for completed sessions"
+        )
+
+    # Check if payment already exists for this session
+    stmt = select(Payment).where(Payment.session_id == payment_data.session_id)
+    result = await db.execute(stmt)
+    existing_payment = result.scalar_one_or_none()
+
+    if existing_payment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment already exists for this session"
+        )
+
+    # Get parking spot and zone to determine tariff
+    stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
+    result = await db.execute(stmt)
+    spot = result.scalar_one_or_none()
+
+    if not spot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parking spot not found"
+        )
+
+    stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+    result = await db.execute(stmt)
+    zone = result.scalar_one_or_none()
+
+    if not zone or not zone.tariff_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Parking zone does not have a tariff plan"
+        )
+
+    # Get tariff plan
+    stmt = select(TariffPlan).where(TariffPlan.tariff_id == zone.tariff_id)
+    result = await db.execute(stmt)
+    tariff = result.scalar_one_or_none()
+
+    if not tariff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tariff plan not found"
+        )
+
+    # Calculate cost
+    try:
+        calculated_amount = calculate_parking_cost(session, tariff)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    # Verify amount matches calculated amount (allow small difference for rounding)
+    if abs(payment_data.amount - calculated_amount) > Decimal('0.02'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Payment amount ({payment_data.amount}) does not match calculated cost ({calculated_amount})"
+        )
+
+    # Create payment
+    new_payment = Payment(
+        session_id=payment_data.session_id,
+        customer_id=current_customer.customer_id,
+        amount=calculated_amount,
+        payment_method=payment_data.payment_method,
+        status="pending"
+    )
+
+    db.add(new_payment)
+    await db.commit()
+    await db.refresh(new_payment)
+
+    return new_payment
+
+
+@router.get("/{payment_id}", response_model=PaymentResponse)
+async def get_payment(
+    payment_id: UUID,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a specific payment"""
+    stmt = select(Payment).where(
+        Payment.payment_id == payment_id,
+        Payment.customer_id == current_customer.customer_id
+    )
+    result = await db.execute(stmt)
+    payment = result.scalar_one_or_none()
+
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found"
+        )
+
+    return payment
+
+
+@router.patch("/{payment_id}", response_model=PaymentResponse)
+async def update_payment_status(
+    payment_id: UUID,
+    payment_update: PaymentUpdate,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update payment status (simulate payment processing)"""
+    stmt = select(Payment).where(
+        Payment.payment_id == payment_id,
+        Payment.customer_id == current_customer.customer_id
+    )
+    result = await db.execute(stmt)
+    payment = result.scalar_one_or_none()
+
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found"
+        )
+
+    # Validate status transition
+    valid_statuses = ["pending", "completed", "failed", "refunded"]
+    if payment_update.status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+
+    payment.status = payment_update.status
+    if payment_update.transaction_id:
+        payment.transaction_id = payment_update.transaction_id
+
+    await db.commit()
+    await db.refresh(payment)
+
+    return payment
+
+
+@router.get("/session/{session_id}/calculate", response_model=dict)
+async def calculate_session_cost(
+    session_id: UUID,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Calculate cost for a parking session"""
+
+    # Get parking session
+    stmt = select(ParkingSession).where(ParkingSession.session_id == session_id)
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parking session not found"
+        )
+
+    # Verify session belongs to customer's vehicle
+    stmt = select(Vehicle).where(
+        Vehicle.vehicle_id == session.vehicle_id,
+        Vehicle.customer_id == current_customer.customer_id
+    )
+    result = await db.execute(stmt)
+    vehicle = result.scalar_one_or_none()
+
+    if not vehicle:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Session does not belong to your vehicle"
+        )
+
+    if not session.exit_time:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session must be completed to calculate cost"
+        )
+
+    # Get parking spot and zone to determine tariff
+    stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
+    result = await db.execute(stmt)
+    spot = result.scalar_one_or_none()
+
+    if not spot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parking spot not found"
+        )
+
+    stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+    result = await db.execute(stmt)
+    zone = result.scalar_one_or_none()
+
+    if not zone or not zone.tariff_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Parking zone does not have a tariff plan"
+        )
+
+    # Get tariff plan
+    stmt = select(TariffPlan).where(TariffPlan.tariff_id == zone.tariff_id)
+    result = await db.execute(stmt)
+    tariff = result.scalar_one_or_none()
+
+    if not tariff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tariff plan not found"
+        )
+
+    # Calculate cost
+    cost = calculate_parking_cost(session, tariff)
+    duration = session.exit_time - session.entry_time
+
+    return {
+        "session_id": session_id,
+        "amount": cost,
+        "currency": "RUB",
+        "duration_hours": float(duration.total_seconds() / 3600),
+        "tariff_name": tariff.name,
+        "tariff_price_per_hour": tariff.price_per_hour
+    }
