@@ -22,6 +22,7 @@ from app.schemas.booking import (
     VehicleDetail
 )
 from app.core.dependencies import get_current_customer
+from app.services.notification_service import notification_service
 
 router = APIRouter()
 
@@ -172,6 +173,22 @@ async def create_booking(
     db.add(new_booking)
     await db.commit()
     await db.refresh(new_booking)
+
+    # Get zone for notification
+    zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+    zone_result = await db.execute(zone_stmt)
+    zone = zone_result.scalar_one()
+
+    # Send booking confirmation notification
+    await notification_service.send_booking_confirmation(
+        customer_email=current_customer.email,
+        customer_name=f"{current_customer.first_name} {current_customer.last_name}",
+        booking_id=str(new_booking.booking_id),
+        zone_name=zone.name,
+        spot_number=spot.spot_number,
+        start_time=new_booking.start_time,
+        end_time=new_booking.end_time
+    )
 
     return new_booking
 

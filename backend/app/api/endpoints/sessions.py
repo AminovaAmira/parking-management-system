@@ -25,6 +25,7 @@ from app.schemas.session import (
     SessionPaymentDetail
 )
 from app.core.dependencies import get_current_customer
+from app.services.notification_service import notification_service
 from decimal import Decimal
 import math
 
@@ -192,6 +193,17 @@ async def start_parking_session(
     await db.commit()
     await db.refresh(new_session)
 
+    # Send session started notification
+    await notification_service.send_session_started(
+        customer_email=current_customer.email,
+        customer_name=f"{current_customer.first_name} {current_customer.last_name}",
+        session_id=str(new_session.session_id),
+        zone_name=zone.name if zone else "Unknown",
+        spot_number=spot.spot_number,
+        vehicle_plate=vehicle.license_plate,
+        entry_time=new_session.entry_time
+    )
+
     return new_session
 
 
@@ -347,6 +359,26 @@ async def end_parking_session(
 
     await db.commit()
     await db.refresh(session)
+
+    # Get vehicle for notification
+    vehicle_stmt = select(Vehicle).where(Vehicle.vehicle_id == session.vehicle_id)
+    vehicle_result = await db.execute(vehicle_stmt)
+    vehicle = vehicle_result.scalar_one_or_none()
+
+    # Send session ended notification
+    if vehicle and spot and zone:
+        await notification_service.send_session_ended(
+            customer_email=current_customer.email,
+            customer_name=f"{current_customer.first_name} {current_customer.last_name}",
+            session_id=str(session.session_id),
+            zone_name=zone.name,
+            spot_number=spot.spot_number,
+            vehicle_plate=vehicle.license_plate,
+            entry_time=session.entry_time,
+            exit_time=session.exit_time,
+            duration_minutes=session.duration_minutes,
+            total_cost=float(session.total_cost)
+        )
 
     return session
 

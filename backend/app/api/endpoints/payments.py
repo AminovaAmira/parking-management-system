@@ -15,6 +15,7 @@ from app.models.parking_zone import ParkingZone
 from app.models.tariff_plan import TariffPlan
 from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from app.core.dependencies import get_current_customer
+from app.services.notification_service import notification_service
 
 router = APIRouter()
 
@@ -234,6 +235,17 @@ async def update_payment_status(
 
     await db.commit()
     await db.refresh(payment)
+
+    # Send payment confirmation if payment completed
+    if payment_update.status == "completed":
+        await notification_service.send_payment_confirmation(
+            customer_email=current_customer.email,
+            customer_name=f"{current_customer.first_name} {current_customer.last_name}",
+            payment_id=str(payment.payment_id),
+            amount=float(payment.amount),
+            payment_method=payment.payment_method,
+            transaction_id=payment.transaction_id
+        )
 
     return payment
 
