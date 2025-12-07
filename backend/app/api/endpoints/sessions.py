@@ -501,3 +501,55 @@ async def get_session_history(
         detailed_sessions.append(detailed_session)
 
     return detailed_sessions
+
+
+@router.get("/statistics/monthly")
+async def get_monthly_statistics(
+    current_customer: Customer = Depends(get_current_customer),
+    months: int = 6,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get monthly parking statistics for charts"""
+    from datetime import timedelta
+    from collections import defaultdict
+
+    # Get customer's vehicle IDs
+    vehicles_stmt = select(Vehicle.vehicle_id).where(Vehicle.customer_id == current_customer.customer_id)
+    vehicles_result = await db.execute(vehicles_stmt)
+    vehicle_ids = [row[0] for row in vehicles_result.all()]
+
+    if not vehicle_ids:
+        return {"months": [], "sessions_count": [], "total_cost": [], "total_hours": []}
+
+    # Calculate date range
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=months * 30)
+
+    # Get all completed sessions in range
+    stmt = select(ParkingSession).where(
+        ParkingSession.vehicle_id.in_(vehicle_ids),
+        ParkingSession.status == "completed",
+        ParkingSession.entry_time >= start_date
+    ).order_by(ParkingSession.entry_time)
+
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    # Group by month
+    monthly_data = defaultdict(lambda: {"count": 0, "cost": 0, "hours": 0})
+
+    for session in sessions:
+        month_key = session.entry_time.strftime("%Y-%m")
+        monthly_data[month_key]["count"] += 1
+        monthly_data[month_key]["cost"] += float(session.total_cost or 0)
+        monthly_data[month_key]["hours"] += (session.duration_minutes or 0) / 60
+
+    # Format response
+    sorted_months = sorted(monthly_data.keys())
+
+    return {
+        "months": sorted_months,
+        "sessions_count": [monthly_data[m]["count"] for m in sorted_months],
+        "total_cost": [round(monthly_data[m]["cost"], 2) for m in sorted_months],
+        "total_hours": [round(monthly_data[m]["hours"], 1) for m in sorted_months]
+    }

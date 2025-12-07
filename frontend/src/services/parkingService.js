@@ -146,6 +146,18 @@ const parkingService = {
     return response.data;
   },
 
+  /**
+   * Get monthly statistics for charts
+   * @param {number} months - Number of months to fetch (default 6)
+   * @returns {Promise} Monthly statistics data
+   */
+  getMonthlyStatistics: async (months = 6) => {
+    const response = await apiClient.get('/api/sessions/statistics/monthly', {
+      params: { months }
+    });
+    return response.data;
+  },
+
   // ========== Payments ==========
 
   /**

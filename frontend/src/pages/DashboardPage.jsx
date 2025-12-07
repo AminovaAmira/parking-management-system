@@ -27,6 +27,7 @@ import {
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import parkingService from '../services/parkingService';
+import AnalyticsDashboard from '../components/AnalyticsDashboard';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -417,6 +418,9 @@ const DashboardPage = () => {
             </Card>
           </Grid>
         </Grid>
+
+        {/* Analytics Dashboard */}
+        <AnalyticsDashboard />
 
         {/* My Vehicles */}
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
