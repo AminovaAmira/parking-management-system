@@ -22,6 +22,18 @@ import {
   DirectionsCar as CarIcon,
   AccessTime as TimeIcon,
 } from '@mui/icons-material';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import parkingService from '../services/parkingService';
 
 const AnalyticsDashboard = () => {
@@ -95,6 +107,14 @@ const AnalyticsDashboard = () => {
 
   const avgCostPerSession = totalSessions > 0 ? totalCost / totalSessions : 0;
   const avgHoursPerSession = totalSessions > 0 ? totalHours / totalSessions : 0;
+
+  // Prepare data for charts
+  const chartData = stats.months.map((month, index) => ({
+    month: formatMonth(month),
+    cost: stats.total_cost[index],
+    sessions: stats.sessions_count[index],
+    hours: stats.total_hours[index],
+  }));
 
   return (
     <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
@@ -199,6 +219,93 @@ const AnalyticsDashboard = () => {
               </Typography>
             </CardContent>
           </Card>
+        </Grid>
+      </Grid>
+
+      {/* Charts */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        {/* Cost Trend Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Динамика расходов
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip
+                  formatter={(value) => `${value.toFixed(2)} ₽`}
+                  labelStyle={{ color: '#000' }}
+                />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="cost"
+                  name="Расходы, ₽"
+                  stroke="#1976d2"
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+
+        {/* Sessions Bar Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Количество парковок
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip
+                  formatter={(value) => `${value} шт`}
+                  labelStyle={{ color: '#000' }}
+                />
+                <Legend />
+                <Bar
+                  dataKey="sessions"
+                  name="Парковок"
+                  fill="#0288d1"
+                  radius={[8, 8, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Grid>
+
+        {/* Hours Chart */}
+        <Grid item xs={12}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Время парковки по месяцам
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip
+                  formatter={(value) => `${value.toFixed(1)} ч`}
+                  labelStyle={{ color: '#000' }}
+                />
+                <Legend />
+                <Bar
+                  dataKey="hours"
+                  name="Часов"
+                  fill="#ed6c02"
+                  radius={[8, 8, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </Paper>
         </Grid>
       </Grid>
 
