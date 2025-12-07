@@ -347,6 +347,9 @@ const DashboardPage = () => {
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button variant="outlined" color="info" onClick={() => navigate('/history')}>
+                История
+              </Button>
               <Button variant="outlined" color="primary" onClick={() => navigate('/profile')}>
                 Профиль
               </Button>

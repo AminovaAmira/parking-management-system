@@ -14,7 +14,16 @@ from app.models.booking import Booking
 from app.models.parking_zone import ParkingZone
 from app.models.tariff_plan import TariffPlan
 from app.models.payment import Payment
-from app.schemas.session import ParkingSessionCreate, ParkingSessionResponse, ParkingSessionEnd
+from app.schemas.session import (
+    ParkingSessionCreate,
+    ParkingSessionResponse,
+    ParkingSessionEnd,
+    ParkingSessionHistoryResponse,
+    SessionSpotDetail,
+    SessionZoneDetail,
+    SessionVehicleDetail,
+    SessionPaymentDetail
+)
 from app.core.dependencies import get_current_customer
 from decimal import Decimal
 import math
@@ -397,3 +406,98 @@ async def calculate_current_cost(
         "estimated_cost": float(cost),
         "status": session.status
     }
+
+
+@router.get("/history/all", response_model=List[ParkingSessionHistoryResponse])
+async def get_session_history(
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed history of all parking sessions for current customer"""
+
+    # Get customer's vehicle IDs
+    vehicles_stmt = select(Vehicle.vehicle_id).where(Vehicle.customer_id == current_customer.customer_id)
+    vehicles_result = await db.execute(vehicles_stmt)
+    vehicle_ids = [row[0] for row in vehicles_result.all()]
+
+    if not vehicle_ids:
+        return []
+
+    # Get all completed sessions
+    stmt = select(ParkingSession).where(
+        ParkingSession.vehicle_id.in_(vehicle_ids),
+        ParkingSession.status == "completed"
+    ).order_by(ParkingSession.entry_time.desc())
+
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    # Build detailed response
+    detailed_sessions = []
+    for session in sessions:
+        # Get spot
+        spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
+        spot_result = await db.execute(spot_stmt)
+        spot = spot_result.scalar_one_or_none()
+
+        if not spot:
+            continue
+
+        # Get zone
+        zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+        zone_result = await db.execute(zone_stmt)
+        zone = zone_result.scalar_one_or_none()
+
+        if not zone:
+            continue
+
+        # Get vehicle
+        vehicle_stmt = select(Vehicle).where(Vehicle.vehicle_id == session.vehicle_id)
+        vehicle_result = await db.execute(vehicle_stmt)
+        vehicle = vehicle_result.scalar_one_or_none()
+
+        if not vehicle:
+            continue
+
+        # Get payment (optional)
+        payment_stmt = select(Payment).where(Payment.session_id == session.session_id)
+        payment_result = await db.execute(payment_stmt)
+        payment = payment_result.scalar_one_or_none()
+
+        # Build detailed session
+        detailed_session = ParkingSessionHistoryResponse(
+            session_id=session.session_id,
+            entry_time=session.entry_time,
+            exit_time=session.exit_time,
+            duration_minutes=session.duration_minutes,
+            total_cost=session.total_cost,
+            status=session.status,
+            created_at=session.created_at,
+            spot=SessionSpotDetail(
+                spot_id=spot.spot_id,
+                spot_number=spot.spot_number,
+                spot_type=spot.spot_type
+            ),
+            zone=SessionZoneDetail(
+                zone_id=zone.zone_id,
+                name=zone.name,
+                address=zone.address
+            ),
+            vehicle=SessionVehicleDetail(
+                vehicle_id=vehicle.vehicle_id,
+                license_plate=vehicle.license_plate,
+                model=vehicle.model,
+                color=vehicle.color
+            ),
+            payment=SessionPaymentDetail(
+                payment_id=payment.payment_id,
+                amount=payment.amount,
+                status=payment.status,
+                payment_method=payment.payment_method,
+                created_at=payment.created_at
+            ) if payment else None
+        )
+
+        detailed_sessions.append(detailed_session)
+
+    return detailed_sessions

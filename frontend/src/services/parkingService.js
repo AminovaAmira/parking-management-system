@@ -137,6 +137,15 @@ const parkingService = {
     return response.data;
   },
 
+  /**
+   * Get session history with detailed information
+   * @returns {Promise} List of completed sessions with details
+   */
+  getSessionHistory: async () => {
+    const response = await apiClient.get('/api/sessions/history/all');
+    return response.data;
+  },
+
   // ========== Payments ==========
 
   /**

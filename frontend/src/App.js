@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
+import HistoryPage from './pages/HistoryPage';
 
 const theme = createTheme({
   palette: {
@@ -34,6 +35,7 @@ function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/history" element={<HistoryPage />} />
             <Route path="/" element={<Navigate to="/login" replace />} />
           </Routes>
         </Router>
