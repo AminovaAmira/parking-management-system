@@ -78,6 +78,32 @@ const authService = {
     const userStr = localStorage.getItem('user');
     return userStr ? JSON.parse(userStr) : null;
   },
+
+  /**
+   * Update user profile
+   * @param {Object} profileData - Profile update data (first_name, last_name, phone)
+   * @returns {Promise} Updated user data
+   */
+  updateProfile: async (profileData) => {
+    const response = await apiClient.patch('/api/auth/me', profileData);
+
+    // Update stored user data
+    if (response.data) {
+      localStorage.setItem('user', JSON.stringify(response.data));
+    }
+
+    return response.data;
+  },
+
+  /**
+   * Change user password
+   * @param {Object} passwordData - Password change data (current_password, new_password)
+   * @returns {Promise} API response
+   */
+  changePassword: async (passwordData) => {
+    const response = await apiClient.post('/api/auth/change-password', passwordData);
+    return response.data;
+  },
 };
 
 export default authService;

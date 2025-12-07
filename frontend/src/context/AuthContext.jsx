@@ -82,11 +82,18 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Update user profile
+   * @param {Object} userData - Optional user data to set directly
    */
-  const updateUser = async () => {
+  const updateUser = async (userData = null) => {
     try {
-      const userData = await authService.getCurrentUser();
-      setUser(userData);
+      if (userData) {
+        // If userData provided, set it directly
+        setUser(userData);
+      } else {
+        // Otherwise fetch from server
+        const freshUserData = await authService.getCurrentUser();
+        setUser(freshUserData);
+      }
     } catch (err) {
       console.error('Failed to update user:', err);
     }

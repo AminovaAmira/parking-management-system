@@ -108,6 +108,63 @@ async def check_availability(
     }
 
 
+@router.get("/{zone_id}/available-spots", response_model=List[ParkingSpotResponse])
+async def get_available_spots_for_timerange(
+    zone_id: UUID,
+    start_time: str,
+    end_time: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get available spots in a zone for a specific time range"""
+    from datetime import datetime
+    from app.models.booking import Booking
+    from sqlalchemy import and_, or_
+
+    # Parse time strings
+    try:
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid datetime format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+        )
+
+    if start_dt >= end_dt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="End time must be after start time"
+        )
+
+    # Get all active spots in the zone
+    stmt = select(ParkingSpot).where(
+        ParkingSpot.zone_id == zone_id,
+        ParkingSpot.is_active == True
+    )
+    result = await db.execute(stmt)
+    all_spots = result.scalars().all()
+
+    # Get bookings that overlap with requested time
+    booking_stmt = select(Booking).where(
+        Booking.spot_id.in_([spot.spot_id for spot in all_spots]),
+        Booking.status.in_(["pending", "confirmed"]),
+        and_(
+            Booking.start_time < end_dt,
+            Booking.end_time > start_dt
+        )
+    )
+    booking_result = await db.execute(booking_stmt)
+    conflicting_bookings = booking_result.scalars().all()
+
+    # Get spot IDs that are booked
+    booked_spot_ids = {booking.spot_id for booking in conflicting_bookings}
+
+    # Filter out booked spots
+    available_spots = [spot for spot in all_spots if spot.spot_id not in booked_spot_ids]
+
+    return available_spots
+
+
 @router.post("/{zone_id}/spots", response_model=ParkingSpotResponse, status_code=status.HTTP_201_CREATED)
 async def create_parking_spot(
     zone_id: UUID,

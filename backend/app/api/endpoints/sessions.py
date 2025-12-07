@@ -12,10 +12,63 @@ from app.models.parking_session import ParkingSession
 from app.models.parking_spot import ParkingSpot
 from app.models.booking import Booking
 from app.models.parking_zone import ParkingZone
+from app.models.tariff_plan import TariffPlan
+from app.models.payment import Payment
 from app.schemas.session import ParkingSessionCreate, ParkingSessionResponse, ParkingSessionEnd
 from app.core.dependencies import get_current_customer
+from decimal import Decimal
+import math
 
 router = APIRouter()
+
+
+async def calculate_session_cost(session: ParkingSession, db: AsyncSession) -> Decimal:
+    """Calculate parking session cost based on duration and tariff"""
+
+    if not session.exit_time:
+        return Decimal("0.00")
+
+    # Calculate duration in minutes
+    duration = session.exit_time - session.entry_time
+    duration_minutes = int(duration.total_seconds() / 60)
+
+    # Get spot and zone to find tariff
+    spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
+    spot_result = await db.execute(spot_stmt)
+    spot = spot_result.scalar_one_or_none()
+
+    if not spot:
+        return Decimal("0.00")
+
+    zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+    zone_result = await db.execute(zone_stmt)
+    zone = zone_result.scalar_one_or_none()
+
+    if not zone or not zone.tariff_id:
+        return Decimal("0.00")
+
+    tariff_stmt = select(TariffPlan).where(TariffPlan.tariff_id == zone.tariff_id)
+    tariff_result = await db.execute(tariff_stmt)
+    tariff = tariff_result.scalar_one_or_none()
+
+    if not tariff:
+        return Decimal("0.00")
+
+    # Calculate cost
+    # If parking is less than 1 day, use hourly rate
+    if duration_minutes < 1440:  # 24 hours = 1440 minutes
+        hours = math.ceil(duration_minutes / 60)  # Round up to next hour
+        cost = tariff.price_per_hour * hours
+
+        # Apply daily max if exists
+        if tariff.price_per_day and cost > tariff.price_per_day:
+            cost = tariff.price_per_day
+    else:
+        # For multi-day parking
+        days = math.ceil(duration_minutes / 1440)
+        cost = tariff.price_per_day * days if tariff.price_per_day else tariff.price_per_hour * 24 * days
+
+    return Decimal(str(cost))
 
 
 @router.get("/", response_model=List[ParkingSessionResponse])
@@ -244,6 +297,13 @@ async def end_parking_session(
     session.exit_time = session_end.exit_time
     session.status = "completed"
 
+    # Calculate duration in minutes
+    duration = session.exit_time - session.entry_time
+    session.duration_minutes = int(duration.total_seconds() / 60)
+
+    # Calculate cost
+    session.total_cost = await calculate_session_cost(session, db)
+
     # Mark spot as available
     stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
     result = await db.execute(stmt)
@@ -259,7 +319,81 @@ async def end_parking_session(
         if zone:
             zone.available_spots = min(zone.total_spots, zone.available_spots + 1)
 
+    # Auto-create payment for the session
+    # Check if payment already exists
+    payment_stmt = select(Payment).where(Payment.session_id == session.session_id)
+    payment_result = await db.execute(payment_stmt)
+    existing_payment = payment_result.scalar_one_or_none()
+
+    if not existing_payment and session.total_cost > 0:
+        # Create payment record
+        new_payment = Payment(
+            session_id=session.session_id,
+            customer_id=current_customer.customer_id,
+            amount=session.total_cost,
+            payment_method="pending",  # User will choose method later
+            status="pending"
+        )
+        db.add(new_payment)
+
     await db.commit()
     await db.refresh(session)
 
     return session
+
+
+@router.get("/{session_id}/calculate-cost")
+async def calculate_current_cost(
+    session_id: UUID,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Calculate current cost for an active session"""
+
+    # Get customer's vehicle IDs
+    vehicles_stmt = select(Vehicle.vehicle_id).where(Vehicle.customer_id == current_customer.customer_id)
+    vehicles_result = await db.execute(vehicles_stmt)
+    vehicle_ids = [row[0] for row in vehicles_result.all()]
+
+    if not vehicle_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    stmt = select(ParkingSession).where(
+        ParkingSession.session_id == session_id,
+        ParkingSession.vehicle_id.in_(vehicle_ids)
+    )
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # Create temporary session with current time as exit to calculate cost
+    temp_session = ParkingSession(
+        session_id=session.session_id,
+        vehicle_id=session.vehicle_id,
+        spot_id=session.spot_id,
+        entry_time=session.entry_time,
+        exit_time=datetime.utcnow(),
+        booking_id=session.booking_id,
+        status=session.status
+    )
+
+    cost = await calculate_session_cost(temp_session, db)
+    duration = datetime.utcnow() - session.entry_time
+    duration_minutes = int(duration.total_seconds() / 60)
+
+    return {
+        "session_id": session_id,
+        "entry_time": session.entry_time,
+        "current_time": datetime.utcnow(),
+        "duration_minutes": duration_minutes,
+        "estimated_cost": float(cost),
+        "status": session.status
+    }

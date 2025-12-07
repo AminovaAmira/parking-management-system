@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.db.database import get_db
 from app.models.customer import Customer
-from app.schemas.customer import CustomerCreate, CustomerResponse, CustomerLogin
+from app.schemas.customer import CustomerCreate, CustomerResponse, CustomerLogin, CustomerUpdate, PasswordChange
 from app.schemas.token import Token
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.dependencies import get_current_customer
@@ -93,3 +93,57 @@ async def get_current_user(
 ):
     """Get current authenticated customer"""
     return customer
+
+
+@router.patch("/me", response_model=CustomerResponse)
+async def update_profile(
+    profile_update: CustomerUpdate,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update current customer profile"""
+
+    # Update fields if provided
+    if profile_update.first_name is not None:
+        current_customer.first_name = profile_update.first_name
+
+    if profile_update.last_name is not None:
+        current_customer.last_name = profile_update.last_name
+
+    if profile_update.phone is not None:
+        current_customer.phone = profile_update.phone
+
+    await db.commit()
+    await db.refresh(current_customer)
+
+    return current_customer
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+async def change_password(
+    password_data: PasswordChange,
+    current_customer: Customer = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    """Change customer password"""
+
+    # Verify current password
+    if not verify_password(password_data.current_password, current_customer.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+
+    # Check that new password is different
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password"
+        )
+
+    # Update password
+    current_customer.password_hash = get_password_hash(password_data.new_password)
+
+    await db.commit()
+
+    return {"message": "Password changed successfully"}

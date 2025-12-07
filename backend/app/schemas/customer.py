@@ -38,3 +38,9 @@ class CustomerLogin(BaseModel):
     """Schema for customer login"""
     email: EmailStr
     password: str
+
+
+class PasswordChange(BaseModel):
+    """Schema for changing password"""
+    current_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=6, max_length=100)

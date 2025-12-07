@@ -37,6 +37,20 @@ const parkingService = {
     return response.data;
   },
 
+  /**
+   * Get available spots in a zone for a specific time range
+   * @param {string} zoneId - Zone ID
+   * @param {string} startTime - Start time (ISO format)
+   * @param {string} endTime - End time (ISO format)
+   * @returns {Promise} List of available spots
+   */
+  getAvailableSpotsForTime: async (zoneId, startTime, endTime) => {
+    const response = await apiClient.get(`/api/zones/${zoneId}/available-spots`, {
+      params: { start_time: startTime, end_time: endTime }
+    });
+    return response.data;
+  },
+
   // ========== Bookings ==========
 
   /**
@@ -115,10 +129,11 @@ const parkingService = {
   /**
    * End a parking session
    * @param {string} sessionId - Session ID
+   * @param {Object} sessionEndData - Session end details (exit_time)
    * @returns {Promise} Updated session
    */
-  endSession: async (sessionId) => {
-    const response = await apiClient.patch(`/api/sessions/${sessionId}/end`);
+  endSession: async (sessionId, sessionEndData) => {
+    const response = await apiClient.patch(`/api/sessions/${sessionId}/end`, sessionEndData);
     return response.data;
   },
 
@@ -144,12 +159,23 @@ const parkingService = {
   },
 
   /**
+   * Update payment status
+   * @param {string} paymentId - Payment ID
+   * @param {Object} paymentUpdate - Payment update data (status, transaction_id)
+   * @returns {Promise} Updated payment
+   */
+  updatePaymentStatus: async (paymentId, paymentUpdate) => {
+    const response = await apiClient.patch(`/api/payments/${paymentId}`, paymentUpdate);
+    return response.data;
+  },
+
+  /**
    * Calculate session cost
    * @param {string} sessionId - Session ID
    * @returns {Promise} Cost calculation
    */
   calculateSessionCost: async (sessionId) => {
-    const response = await apiClient.get(`/api/payments/session/${sessionId}/calculate`);
+    const response = await apiClient.get(`/api/sessions/${sessionId}/calculate-cost`);
     return response.data;
   },
 
@@ -191,6 +217,10 @@ const parkingService = {
 
   getMyBookings: async (status = null) => {
     return parkingService.getBookings(status);
+  },
+
+  getMySessions: async (status = null) => {
+    return parkingService.getSessions(status);
   },
 };
 

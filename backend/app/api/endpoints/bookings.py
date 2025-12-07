@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
 from datetime import datetime
@@ -10,19 +11,28 @@ from app.models.customer import Customer
 from app.models.vehicle import Vehicle
 from app.models.booking import Booking
 from app.models.parking_spot import ParkingSpot
-from app.schemas.booking import BookingCreate, BookingResponse, BookingStatusUpdate
+from app.models.parking_zone import ParkingZone
+from app.schemas.booking import (
+    BookingCreate,
+    BookingResponse,
+    BookingStatusUpdate,
+    BookingDetailResponse,
+    SpotDetail,
+    ZoneDetail,
+    VehicleDetail
+)
 from app.core.dependencies import get_current_customer
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[BookingResponse])
+@router.get("/", response_model=List[BookingDetailResponse])
 async def get_my_bookings(
     current_customer: Customer = Depends(get_current_customer),
     status: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all bookings for current customer"""
+    """Get all bookings for current customer with detailed information"""
     stmt = select(Booking).where(Booking.customer_id == current_customer.customer_id)
 
     if status:
@@ -32,7 +42,54 @@ async def get_my_bookings(
 
     result = await db.execute(stmt)
     bookings = result.scalars().all()
-    return bookings
+
+    # Manually build detailed response with related data
+    detailed_bookings = []
+    for booking in bookings:
+        # Get spot
+        spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == booking.spot_id)
+        spot_result = await db.execute(spot_stmt)
+        spot = spot_result.scalar_one()
+
+        # Get zone
+        zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+        zone_result = await db.execute(zone_stmt)
+        zone = zone_result.scalar_one()
+
+        # Get vehicle
+        vehicle_stmt = select(Vehicle).where(Vehicle.vehicle_id == booking.vehicle_id)
+        vehicle_result = await db.execute(vehicle_stmt)
+        vehicle = vehicle_result.scalar_one()
+
+        # Build response
+        detailed_booking = BookingDetailResponse(
+            booking_id=booking.booking_id,
+            customer_id=booking.customer_id,
+            start_time=booking.start_time,
+            end_time=booking.end_time,
+            status=booking.status,
+            created_at=booking.created_at,
+            updated_at=booking.updated_at,
+            spot=SpotDetail(
+                spot_id=spot.spot_id,
+                spot_number=spot.spot_number,
+                spot_type=spot.spot_type
+            ),
+            zone=ZoneDetail(
+                zone_id=zone.zone_id,
+                name=zone.name,
+                address=zone.address
+            ),
+            vehicle=VehicleDetail(
+                vehicle_id=vehicle.vehicle_id,
+                license_plate=vehicle.license_plate,
+                model=vehicle.model,
+                color=vehicle.color
+            )
+        )
+        detailed_bookings.append(detailed_booking)
+
+    return detailed_bookings
 
 
 @router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
