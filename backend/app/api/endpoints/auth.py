@@ -7,6 +7,7 @@ from app.models.customer import Customer
 from app.schemas.customer import CustomerCreate, CustomerResponse, CustomerLogin
 from app.schemas.token import Token
 from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.dependencies import get_current_customer
 from datetime import timedelta
 from app.core.config import settings
 
@@ -88,7 +89,7 @@ async def login(
 
 @router.get("/me", response_model=CustomerResponse)
 async def get_current_user(
-    customer: Customer = Depends(lambda: __import__('app.core.dependencies', fromlist=['get_current_customer']).get_current_customer)
+    customer: Customer = Depends(get_current_customer)
 ):
     """Get current authenticated customer"""
     return customer
