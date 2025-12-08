@@ -354,6 +354,11 @@ const DashboardPage = () => {
               <Button variant="outlined" color="primary" onClick={() => navigate('/profile')}>
                 Профиль
               </Button>
+              {user?.is_admin && (
+                <Button variant="outlined" color="error" onClick={() => navigate('/admin')}>
+                  Админ-панель
+                </Button>
+              )}
               <Button variant="outlined" color="secondary" onClick={handleLogout}>
                 Выйти
               </Button>

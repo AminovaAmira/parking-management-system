@@ -27,6 +27,7 @@ class CustomerUpdate(BaseModel):
 class CustomerResponse(CustomerBase):
     """Schema for customer response"""
     customer_id: UUID
+    is_admin: bool = False
     created_at: datetime
     updated_at: datetime
 
