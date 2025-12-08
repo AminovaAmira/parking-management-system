@@ -14,7 +14,7 @@ from sqlalchemy import select
 # Добавляем корневую директорию проекта в sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.db.database import async_session_maker
+from app.db.database import AsyncSessionLocal
 from app.models.customer import Customer
 from app.models.vehicle import Vehicle
 from app.models.parking_spot import ParkingSpot
@@ -95,7 +95,7 @@ async def create_booking(
 
 async def populate_bookings():
     """Заполнить базу тестовыми бронированиями"""
-    async with async_session_maker() as db:
+    async with AsyncSessionLocal() as db:
         try:
             # Получаем все парковочные места
             spots_stmt = select(ParkingSpot).where(ParkingSpot.is_active == True)
@@ -187,7 +187,7 @@ async def populate_bookings():
 
 async def clear_future_bookings():
     """Удалить все будущие бронирования (для повторного запуска скрипта)"""
-    async with async_session_maker() as db:
+    async with AsyncSessionLocal() as db:
         try:
             now = datetime.now()
 
