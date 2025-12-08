@@ -104,6 +104,9 @@ const RegisterPage = () => {
                   value={formData.first_name}
                   onChange={handleChange}
                   disabled={loading}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -117,6 +120,9 @@ const RegisterPage = () => {
                   value={formData.last_name}
                   onChange={handleChange}
                   disabled={loading}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -130,6 +136,9 @@ const RegisterPage = () => {
                   value={formData.email}
                   onChange={handleChange}
                   disabled={loading}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -143,6 +152,9 @@ const RegisterPage = () => {
                   onChange={handleChange}
                   disabled={loading}
                   placeholder="+7 (999) 999-99-99"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -158,6 +170,9 @@ const RegisterPage = () => {
                   onChange={handleChange}
                   disabled={loading}
                   helperText="Минимум 6 символов"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -171,6 +186,9 @@ const RegisterPage = () => {
                   value={formData.confirmPassword}
                   onChange={handleChange}
                   disabled={loading}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
                 />
               </Grid>
             </Grid>

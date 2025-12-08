@@ -29,6 +29,7 @@ import { useAuth } from '../context/AuthContext';
 import parkingService from '../services/parkingService';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import OCRUpload from '../components/OCRUpload';
+import ParkingMapView from '../components/ParkingMapView';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -48,6 +49,7 @@ const DashboardPage = () => {
   const [availableSpots, setAvailableSpots] = useState([]);
   const [selectedZone, setSelectedZone] = useState('');
   const [loadingSpots, setLoadingSpots] = useState(false);
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'map'
   const [newVehicle, setNewVehicle] = useState({
     license_plate: '',
     make: '',
@@ -181,6 +183,10 @@ const DashboardPage = () => {
     setSelectedZone('');
     setAvailableSpots([]);
     setNewBooking({ ...newBooking, spot_id: '' });
+  };
+
+  const handleSpotSelectFromMap = (spot) => {
+    setNewBooking({ ...newBooking, spot_id: spot.spot_id });
   };
 
   const handleCreateBooking = async () => {
@@ -752,11 +758,39 @@ const DashboardPage = () => {
       </Dialog>
 
       {/* Create Booking Dialog */}
-      <Dialog open={openBookingDialog} onClose={() => setOpenBookingDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Создать бронирование</DialogTitle>
+      <Dialog
+        open={openBookingDialog}
+        onClose={() => setOpenBookingDialog(false)}
+        maxWidth={viewMode === 'map' ? 'lg' : 'sm'}
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Создать бронирование</span>
+            <Box>
+              <Button
+                size="small"
+                variant={viewMode === 'list' ? 'contained' : 'outlined'}
+                onClick={() => setViewMode('list')}
+                sx={{ mr: 1 }}
+              >
+                Список
+              </Button>
+              <Button
+                size="small"
+                variant={viewMode === 'map' ? 'contained' : 'outlined'}
+                onClick={() => setViewMode('map')}
+              >
+                План
+              </Button>
+            </Box>
+          </Box>
+        </DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
-            Выберите время, затем парковочную зону. Система покажет только свободные места на выбранное время.
+            {viewMode === 'list'
+              ? 'Выберите время, затем парковочную зону. Система покажет только свободные места на выбранное время.'
+              : 'Выберите время, затем выберите место на плане парковки.'}
           </Alert>
 
           <TextField
@@ -774,99 +808,110 @@ const DashboardPage = () => {
             ))}
           </TextField>
 
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-              Начало бронирования
-            </Typography>
-            <TextField
-              type="datetime-local"
-              fullWidth
-              value={newBooking.start_time}
-              onChange={(e) => {
-                setNewBooking({ ...newBooking, start_time: e.target.value });
-                handleTimeChange();
-              }}
-              InputLabelProps={{
-                shrink: true,
-              }}
-              inputProps={{
-                min: new Date().toISOString().slice(0, 16)
-              }}
-            />
-          </Box>
-
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-              Окончание бронирования
-            </Typography>
-            <TextField
-              type="datetime-local"
-              fullWidth
-              value={newBooking.end_time}
-              onChange={(e) => {
-                setNewBooking({ ...newBooking, end_time: e.target.value });
-                handleTimeChange();
-              }}
-              InputLabelProps={{
-                shrink: true,
-              }}
-              inputProps={{
-                min: newBooking.start_time || new Date().toISOString().slice(0, 16)
-              }}
-            />
-          </Box>
+          <TextField
+            margin="dense"
+            label="Начало бронирования"
+            type="datetime-local"
+            fullWidth
+            value={newBooking.start_time}
+            onChange={(e) => {
+              setNewBooking({ ...newBooking, start_time: e.target.value });
+              handleTimeChange();
+            }}
+            InputLabelProps={{
+              shrink: true,
+            }}
+            inputProps={{
+              min: new Date().toISOString().slice(0, 16)
+            }}
+          />
 
           <TextField
             margin="dense"
-            label="Выберите парковочную зону"
-            select
+            label="Окончание бронирования"
+            type="datetime-local"
             fullWidth
-            value={selectedZone}
-            onChange={(e) => handleZoneChange(e.target.value)}
-            disabled={!newBooking.start_time || !newBooking.end_time}
-            helperText={!newBooking.start_time || !newBooking.end_time ? "Сначала выберите время" : ""}
-          >
-            {zones.map((zone) => (
-              <MenuItem key={zone.zone_id} value={zone.zone_id}>
-                {zone.name} - {zone.address}
-              </MenuItem>
-            ))}
-          </TextField>
+            value={newBooking.end_time}
+            onChange={(e) => {
+              setNewBooking({ ...newBooking, end_time: e.target.value });
+              handleTimeChange();
+            }}
+            InputLabelProps={{
+              shrink: true,
+            }}
+            inputProps={{
+              min: newBooking.start_time || new Date().toISOString().slice(0, 16)
+            }}
+          />
 
-          {loadingSpots ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
-              <CircularProgress size={24} />
-              <Typography sx={{ ml: 2 }}>Поиск свободных мест...</Typography>
-            </Box>
+          {viewMode === 'list' ? (
+            <>
+              <TextField
+                margin="dense"
+                label="Выберите парковочную зону"
+                select
+                fullWidth
+                value={selectedZone}
+                onChange={(e) => handleZoneChange(e.target.value)}
+                disabled={!newBooking.start_time || !newBooking.end_time}
+                helperText={!newBooking.start_time || !newBooking.end_time ? "Сначала выберите время" : ""}
+              >
+                {zones.map((zone) => (
+                  <MenuItem key={zone.zone_id} value={zone.zone_id}>
+                    {zone.name} - {zone.address}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {loadingSpots ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                  <CircularProgress size={24} />
+                  <Typography sx={{ ml: 2 }}>Поиск свободных мест...</Typography>
+                </Box>
+              ) : (
+                selectedZone && (
+                  <>
+                    {availableSpots.length > 0 && (
+                      <Alert severity="success" sx={{ mt: 2, mb: 1 }}>
+                        Найдено {availableSpots.length} свободных мест на выбранное время
+                      </Alert>
+                    )}
+                    <TextField
+                      margin="dense"
+                      label="Выберите место"
+                      select
+                      fullWidth
+                      value={newBooking.spot_id}
+                      onChange={(e) => setNewBooking({ ...newBooking, spot_id: e.target.value })}
+                      disabled={availableSpots.length === 0}
+                    >
+                      {availableSpots.length === 0 ? (
+                        <MenuItem disabled>Нет свободных мест на выбранное время</MenuItem>
+                      ) : (
+                        availableSpots.map((spot) => (
+                          <MenuItem key={spot.spot_id} value={spot.spot_id}>
+                            Место {spot.spot_number} ({spot.spot_type})
+                          </MenuItem>
+                        ))
+                      )}
+                    </TextField>
+                  </>
+                )
+              )}
+            </>
           ) : (
-            selectedZone && (
-              <>
-                {availableSpots.length > 0 && (
-                  <Alert severity="success" sx={{ mt: 2, mb: 1 }}>
-                    Найдено {availableSpots.length} свободных мест на выбранное время
-                  </Alert>
-                )}
-                <TextField
-                  margin="dense"
-                  label="Выберите место"
-                  select
-                  fullWidth
-                  value={newBooking.spot_id}
-                  onChange={(e) => setNewBooking({ ...newBooking, spot_id: e.target.value })}
-                  disabled={availableSpots.length === 0}
-                >
-                  {availableSpots.length === 0 ? (
-                    <MenuItem disabled>Нет свободных мест на выбранное время</MenuItem>
-                  ) : (
-                    availableSpots.map((spot) => (
-                      <MenuItem key={spot.spot_id} value={spot.spot_id}>
-                        Место {spot.spot_number} ({spot.spot_type})
-                      </MenuItem>
-                    ))
-                  )}
-                </TextField>
-              </>
-            )
+            <Box sx={{ mt: 2 }}>
+              {newBooking.start_time && newBooking.end_time ? (
+                <ParkingMapView
+                  onSpotSelect={handleSpotSelectFromMap}
+                  selectedSpotId={newBooking.spot_id}
+                />
+              ) : (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  Пожалуйста, сначала выберите время начала и окончания бронирования
+                </Alert>
+              )}
+            </Box>
           )}
         </DialogContent>
         <DialogActions>

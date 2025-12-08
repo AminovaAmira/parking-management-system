@@ -85,6 +85,9 @@ const LoginPage = () => {
               value={formData.email}
               onChange={handleChange}
               disabled={loading}
+              InputLabelProps={{
+                shrink: true,
+              }}
             />
             <TextField
               margin="normal"
@@ -98,6 +101,9 @@ const LoginPage = () => {
               value={formData.password}
               onChange={handleChange}
               disabled={loading}
+              InputLabelProps={{
+                shrink: true,
+              }}
             />
             <Button
               type="submit"
