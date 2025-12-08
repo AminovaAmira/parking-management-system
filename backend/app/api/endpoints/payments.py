@@ -16,6 +16,7 @@ from app.models.tariff_plan import TariffPlan
 from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from app.core.dependencies import get_current_customer
 from app.services.notification_service import notification_service
+from app.services.mock_payment_service import mock_payment_service
 
 router = APIRouter()
 
@@ -229,15 +230,35 @@ async def update_payment_status(
             detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
         )
 
-    payment.status = payment_update.status
-    if payment_update.transaction_id:
-        payment.transaction_id = payment_update.transaction_id
+    # If status is being set to completed, process through mock payment service
+    if payment_update.status == "completed" and payment.status != "completed":
+        # Process payment through mock service
+        payment_result = await mock_payment_service.process_payment(
+            amount=float(payment.amount),
+            payment_method=payment.payment_method,
+            customer_email=current_customer.email,
+            description=f"Parking payment {str(payment.payment_id)[:8]}"
+        )
+
+        if payment_result["status"] == "completed":
+            payment.status = "completed"
+            payment.transaction_id = payment_result["transaction_id"]
+        else:
+            payment.status = "failed"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=payment_result.get("message", "Payment processing failed")
+            )
+    else:
+        payment.status = payment_update.status
+        if payment_update.transaction_id:
+            payment.transaction_id = payment_update.transaction_id
 
     await db.commit()
     await db.refresh(payment)
 
     # Send payment confirmation if payment completed
-    if payment_update.status == "completed":
+    if payment.status == "completed":
         await notification_service.send_payment_confirmation(
             customer_email=current_customer.email,
             customer_name=f"{current_customer.first_name} {current_customer.last_name}",
