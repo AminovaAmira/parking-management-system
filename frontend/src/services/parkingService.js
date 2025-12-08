@@ -191,6 +191,15 @@ const parkingService = {
   },
 
   /**
+   * Get all payments
+   * @returns {Promise} List of payments
+   */
+  getAllPayments: async () => {
+    const response = await apiClient.get('/api/payments');
+    return response.data;
+  },
+
+  /**
    * Calculate session cost
    * @param {string} sessionId - Session ID
    * @returns {Promise} Cost calculation
@@ -242,6 +251,34 @@ const parkingService = {
 
   getMySessions: async (status = null) => {
     return parkingService.getSessions(status);
+  },
+
+  // ========== OCR - License Plate Recognition ==========
+
+  /**
+   * Recognize license plate from image
+   * @param {FormData} formData - FormData with image file
+   * @returns {Promise} Recognition result
+   */
+  recognizeLicensePlate: async (formData) => {
+    const response = await apiClient.post('/api/ocr/recognize', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  /**
+   * Validate license plate format
+   * @param {string} licensePlate - License plate number
+   * @returns {Promise} Validation result
+   */
+  validateLicensePlate: async (licensePlate) => {
+    const response = await apiClient.post('/api/ocr/validate', null, {
+      params: { license_plate: licensePlate },
+    });
+    return response.data;
   },
 };
 

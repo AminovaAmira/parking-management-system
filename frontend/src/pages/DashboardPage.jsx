@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import parkingService from '../services/parkingService';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
+import OCRUpload from '../components/OCRUpload';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -699,6 +700,9 @@ const DashboardPage = () => {
       <Dialog open={openVehicleDialog} onClose={() => setOpenVehicleDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Добавить автомобиль</DialogTitle>
         <DialogContent>
+          <OCRUpload
+            onPlateRecognized={(plate) => setNewVehicle({ ...newVehicle, license_plate: plate })}
+          />
           <TextField
             margin="dense"
             label="Номер (А123ВС777)"
