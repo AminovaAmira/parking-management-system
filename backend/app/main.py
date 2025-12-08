@@ -39,7 +39,7 @@ async def health_check():
 
 
 # Import routers
-from app.api.endpoints import auth, vehicles, zones, bookings, sessions, payments, ocr
+from app.api.endpoints import auth, vehicles, zones, bookings, sessions, payments, ocr, admin
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -49,3 +49,4 @@ app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Parking Sessions"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR - License Plate Recognition"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])

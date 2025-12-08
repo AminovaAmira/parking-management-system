@@ -45,3 +45,15 @@ async def get_current_customer(
         raise credentials_exception
 
     return customer
+
+
+async def get_current_admin(
+    current_customer: Customer = Depends(get_current_customer)
+) -> Customer:
+    """Check if current customer is admin"""
+    if not current_customer.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions. Admin access required."
+        )
+    return current_customer
