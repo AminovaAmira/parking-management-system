@@ -104,33 +104,71 @@ def detect_license_plate_region(image: np.ndarray) -> Optional[np.ndarray]:
         # Применение билатерального фильтра для сохранения краев
         bilateral = cv2.bilateralFilter(gray, 11, 17, 17)
 
-        # Обнаружение краев
-        edged = cv2.Canny(bilateral, 30, 200)
+        # Обнаружение краев с более строгими порогами
+        edged = cv2.Canny(bilateral, 50, 150)
+
+        # Морфологические операции для объединения краёв
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
 
         # Поиск контуров
-        contours, _ = cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
+        contours, _ = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:15]
 
-        # Поиск прямоугольного контура (номерной знак обычно прямоугольный)
+        candidates = []
+
+        # Поиск прямоугольных контуров (номерной знак обычно прямоугольный)
         for contour in contours:
             peri = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.018 * peri, True)
+            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
 
-            if len(approx) == 4:  # Прямоугольник
+            # Прямоугольник может иметь 4-6 вершин из-за шума
+            if 4 <= len(approx) <= 6:
                 x, y, w, h = cv2.boundingRect(approx)
                 aspect_ratio = w / float(h)
+                area = w * h
 
-                # Российские номера обычно имеют соотношение сторон около 2.5:1 - 4:1
-                if 2.0 < aspect_ratio < 5.0:
-                    # Добавляем небольшой отступ
-                    margin = 5
-                    x = max(0, x - margin)
-                    y = max(0, y - margin)
-                    w = min(image.shape[1] - x, w + 2 * margin)
-                    h = min(image.shape[0] - y, h + 2 * margin)
+                # Российские номера: соотношение 2.0:1 - 5.0:1
+                # Минимальный размер - чтобы отфильтровать мелкие контуры
+                min_area = (image.shape[0] * image.shape[1]) * 0.01  # минимум 1% от площади
 
-                    return gray[y:y+h, x:x+w]
+                if 2.0 < aspect_ratio < 5.0 and area > min_area:
+                    # Проверяем, что контур не слишком большой (не весь бампер)
+                    max_area = (image.shape[0] * image.shape[1]) * 0.3  # максимум 30% от площади
 
+                    if area < max_area:
+                        candidates.append((x, y, w, h, area, aspect_ratio))
+
+        # Если нашли кандидатов, выбираем лучший
+        if candidates:
+            # Сортируем по площади (предпочитаем средние размеры)
+            # Идеальная площадь номера - около 5-15% от изображения
+            ideal_area = (image.shape[0] * image.shape[1]) * 0.10
+
+            def score_candidate(candidate):
+                x, y, w, h, area, aspect_ratio = candidate
+                # Штраф за отклонение от идеальной площади
+                area_diff = abs(area - ideal_area) / ideal_area
+                # Штраф за отклонение от идеального aspect ratio (3.5:1)
+                aspect_diff = abs(aspect_ratio - 3.5) / 3.5
+                # Меньше - лучше
+                return area_diff + aspect_diff
+
+            best_candidate = min(candidates, key=score_candidate)
+            x, y, w, h, _, _ = best_candidate
+
+            # Добавляем небольшой отступ
+            margin = 5
+            x = max(0, x - margin)
+            y = max(0, y - margin)
+            w = min(image.shape[1] - x, w + 2 * margin)
+            h = min(image.shape[0] - y, h + 2 * margin)
+
+            plate_region = gray[y:y+h, x:x+w]
+            logger.info(f"Detected plate region: {w}x{h}, aspect={w/float(h):.2f}")
+            return plate_region
+
+        logger.info("No suitable plate region found")
         return None
     except Exception as e:
         logger.warning(f"Failed to detect plate region: {str(e)}")
@@ -179,6 +217,12 @@ def preprocess_license_plate_text(text: str, try_fix_region: bool = True) -> str
     # Удаление спецсимволов, оставляем только буквы и цифры
     text = re.sub(r'[^A-ZА-Я0-9]', '', text)
 
+    # ВАЖНО: Российский номер не может быть длиннее 9 символов (А123БВ777)
+    # Если получилось больше - это мусор, отбрасываем
+    if len(text) > 10:
+        logger.warning(f"Text too long ({len(text)} chars), likely not a plate: {text[:20]}...")
+        return ""
+
     # Попытка исправить код региона
     if try_fix_region and len(text) >= 6:
         text = fix_region_code(text)
@@ -186,7 +230,7 @@ def preprocess_license_plate_text(text: str, try_fix_region: bool = True) -> str
     return text
 
 
-def validate_russian_license_plate(plate: str) -> bool:
+def validate_russian_license_plate(plate: str, strict: bool = True) -> bool:
     """
     Валидация формата российского номерного знака
 
@@ -195,18 +239,31 @@ def validate_russian_license_plate(plate: str) -> bool:
     - А123БВ777 (легковые с 3-значным регионом)
     - М123КУ77 (Московский регион)
     """
+    # Базовая проверка длины
+    if len(plate) < 6 or len(plate) > 9:
+        return False
+
     # Российские буквы, разрешенные на номерах (совпадают с латинскими)
     russian_letters = 'АВЕКМНОРСТУХ'
 
-    patterns = [
-        # Стандартный формат: 1 буква + 3 цифры + 2 буквы + 2-3 цифры
-        f'^[{russian_letters}]\\d{{3}}[{russian_letters}]{{2}}\\d{{2,3}}$',
-        # Альтернативный формат: 2 буквы + 4 цифры + 2-3 цифры
-        f'^[{russian_letters}]{{2}}\\d{{4}}\\d{{2,3}}$',
-    ]
+    # Строгая проверка формата
+    if strict:
+        patterns = [
+            # Стандартный формат: 1 буква + 3 цифры + 2 буквы + 2-3 цифры
+            f'^[{russian_letters}]\\d{{3}}[{russian_letters}]{{2}}\\d{{2,3}}$',
+            # Альтернативный формат: 2 буквы + 4 цифры + 2-3 цифры
+            f'^[{russian_letters}]{{2}}\\d{{4}}\\d{{2,3}}$',
+        ]
 
-    for pattern in patterns:
-        if re.match(pattern, plate):
+        for pattern in patterns:
+            if re.match(pattern, plate):
+                return True
+    else:
+        # Нестрогая проверка: минимум 3 буквы и минимум 5 цифр
+        letter_count = sum(1 for c in plate if c in russian_letters)
+        digit_count = sum(1 for c in plate if c.isdigit())
+
+        if letter_count >= 3 and digit_count >= 5:
             return True
 
     return False
@@ -392,50 +449,85 @@ def extract_license_plate_from_image(image_bytes: bytes, lang: str = 'rus+eng') 
         # Попытка выделить регион номерного знака
         plate_region = detect_license_plate_region(image_np)
 
-        # Если регион найден, используем его, иначе - все изображение
-        target_image = plate_region if plate_region is not None else (
-            cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
-        )
-
-        logger.info(f"Processing image, plate region detected: {plate_region is not None}")
-
-        # Гибридный подход: пробуем оба метода
         results = []
 
-        # 1. Попытка с EasyOCR (обычно лучше для сложных случаев)
-        easyocr_result = extract_with_easyocr(target_image)
-        if easyocr_result:
-            results.append(('easyocr', easyocr_result))
-            logger.info(f"EasyOCR result: {easyocr_result}")
+        # Если регион найден, пробуем его распознать
+        if plate_region is not None:
+            logger.info("Plate region detected, processing it")
 
-        # 2. Попытка с Tesseract (быстрее, хорош для четких изображений)
-        tesseract_result = extract_with_tesseract(target_image, lang)
-        if tesseract_result:
-            results.append(('tesseract', tesseract_result))
-            logger.info(f"Tesseract result: {tesseract_result}")
+            # 1. Попытка с EasyOCR на выделенном регионе
+            easyocr_result = extract_with_easyocr(plate_region)
+            if easyocr_result and len(easyocr_result) <= 10:
+                results.append(('easyocr_region', easyocr_result))
+                logger.info(f"EasyOCR (region) result: {easyocr_result}")
+
+            # 2. Попытка с Tesseract на выделенном регионе
+            tesseract_result = extract_with_tesseract(plate_region, lang)
+            if tesseract_result and len(tesseract_result) <= 10:
+                results.append(('tesseract_region', tesseract_result))
+                logger.info(f"Tesseract (region) result: {tesseract_result}")
+
+        # Если регион не найден или результаты плохие, пробуем на всём изображении
+        # НО только если изображение не слишком большое (иначе будет мусор)
+        if not results or not any(validate_russian_license_plate(r[1]) for r in results):
+            logger.info("No valid results from region, trying full image (if small enough)")
+
+            gray_full = cv2.cvtColor(image_np, cv2.COLOR_BGR2GRAY)
+            image_area = gray_full.shape[0] * gray_full.shape[1]
+
+            # Только если изображение достаточно мало (вероятно, это просто номер)
+            if image_area < 500000:  # < 500K пикселей
+                tesseract_full = extract_with_tesseract(gray_full, lang)
+                if tesseract_full and len(tesseract_full) <= 10:
+                    results.append(('tesseract_full', tesseract_full))
+                    logger.info(f"Tesseract (full) result: {tesseract_full}")
+            else:
+                logger.info("Image too large to process fully, skipping")
 
         # Выбор лучшего результата
         if not results:
             logger.warning("No license plate detected by any method")
             return None
 
-        # Приоритет: валидный формат > длина > EasyOCR > Tesseract
+        # Фильтруем результаты: только те, что похожи на номер
+        valid_results = []
+        for method, plate in results:
+            # Проверяем с нестрогой валидацией
+            if validate_russian_license_plate(plate, strict=False):
+                valid_results.append((method, plate))
+            else:
+                logger.debug(f"Filtered out invalid result: {plate}")
+
+        if not valid_results:
+            logger.warning("No valid results after filtering")
+            return None
+
+        # Приоритет: валидный формат > длина > регион > EasyOCR
         best_result = None
         best_score = -1
 
-        for method, plate in results:
+        for method, plate in valid_results:
             score = 0
 
-            # +10 за валидный формат
-            if validate_russian_license_plate(plate):
-                score += 10
+            # +15 за строго валидный формат
+            if validate_russian_license_plate(plate, strict=True):
+                score += 15
+            # +5 за нестрого валидный
+            else:
+                score += 5
 
             # +1 за каждый символ (оптимум 8-9 символов)
             score += min(len(plate), 9)
 
-            # +5 за EasyOCR (обычно точнее)
-            if method == 'easyocr':
-                score += 5
+            # +3 за распознавание на выделенном регионе
+            if 'region' in method:
+                score += 3
+
+            # +2 за EasyOCR (обычно точнее)
+            if 'easyocr' in method:
+                score += 2
+
+            logger.debug(f"Score for {method} '{plate}': {score}")
 
             if score > best_score:
                 best_score = score
