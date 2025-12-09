@@ -119,7 +119,7 @@ function AdminPage() {
       <Container maxWidth="lg" sx={{ mt: 4 }}>
         <Alert severity="error">{error}</Alert>
         <Typography variant="body2" sx={{ mt: 2 }}>
-          У вас нет прав администратора. Войдите как amira@test.com
+          У вас нет прав администратора. Пожалуйста, войдите с аккаунтом администратора.
         </Typography>
       </Container>
     );
