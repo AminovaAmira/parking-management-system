@@ -45,6 +45,13 @@ const RegisterPage = () => {
       return;
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Пожалуйста, введите корректный email адрес');
+      return;
+    }
+
     if (formData.password.length < 6) {
       setError('Пароль должен содержать минимум 6 символов');
       return;
@@ -132,6 +139,7 @@ const RegisterPage = () => {
                   id="email"
                   label="Email"
                   name="email"
+                  type="email"
                   autoComplete="email"
                   value={formData.email}
                   onChange={handleChange}

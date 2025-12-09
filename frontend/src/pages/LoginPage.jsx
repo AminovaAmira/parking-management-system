@@ -39,6 +39,13 @@ const LoginPage = () => {
       return;
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Пожалуйста, введите корректный email адрес');
+      return;
+    }
+
     const result = await login(formData);
 
     if (result.success) {
@@ -80,6 +87,7 @@ const LoginPage = () => {
               id="email"
               label="Email"
               name="email"
+              type="email"
               autoComplete="email"
               autoFocus
               value={formData.email}
