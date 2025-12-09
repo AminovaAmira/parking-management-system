@@ -13,7 +13,8 @@ class PaymentBase(BaseModel):
 
 class PaymentCreate(PaymentBase):
     """Schema for creating a payment"""
-    session_id: UUID
+    session_id: Optional[UUID] = None
+    booking_id: Optional[UUID] = None
 
 
 class PaymentUpdate(BaseModel):
@@ -25,10 +26,11 @@ class PaymentUpdate(BaseModel):
 class PaymentResponse(PaymentBase):
     """Schema for payment response"""
     payment_id: UUID
-    session_id: UUID
+    session_id: Optional[UUID] = None
+    booking_id: Optional[UUID] = None
     customer_id: UUID
     status: str
-    transaction_id: Optional[str]
+    transaction_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
