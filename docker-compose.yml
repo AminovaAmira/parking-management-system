@@ -1,3 +1,5 @@
+name: parking-management-system
+
 services:
   # PostgreSQL Database
   db:
