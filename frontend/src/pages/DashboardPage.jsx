@@ -870,8 +870,10 @@ const DashboardPage = () => {
             value={newBooking.start_time || ''}
             onChange={(e) => {
               const value = e.target.value;
-              setNewBooking({ ...newBooking, start_time: value });
-              handleTimeChange();
+              // Update start_time and reset zone/spot_id in a single state update
+              setNewBooking({ ...newBooking, start_time: value, spot_id: '' });
+              setSelectedZone('');
+              setAvailableSpots([]);
             }}
             InputLabelProps={{
               shrink: true,
@@ -889,8 +891,10 @@ const DashboardPage = () => {
             value={newBooking.end_time || ''}
             onChange={(e) => {
               const value = e.target.value;
-              setNewBooking({ ...newBooking, end_time: value });
-              handleTimeChange();
+              // Update end_time and reset zone/spot_id in a single state update
+              setNewBooking({ ...newBooking, end_time: value, spot_id: '' });
+              setSelectedZone('');
+              setAvailableSpots([]);
             }}
             InputLabelProps={{
               shrink: true,
