@@ -13,6 +13,7 @@ from app.models.parking_session import ParkingSession
 from app.models.parking_spot import ParkingSpot
 from app.models.parking_zone import ParkingZone
 from app.models.tariff_plan import TariffPlan
+from app.models.booking import Booking
 from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
 from app.core.dependencies import get_current_customer
 from app.services.notification_service import notification_service
@@ -256,6 +257,16 @@ async def update_payment_status(
 
     await db.commit()
     await db.refresh(payment)
+
+    # If payment is for a booking, update booking status to confirmed
+    if payment.status == "completed" and payment.booking_id:
+        stmt = select(Booking).where(Booking.booking_id == payment.booking_id)
+        result = await db.execute(stmt)
+        booking = result.scalar_one_or_none()
+
+        if booking and booking.status == "pending":
+            booking.status = "confirmed"
+            await db.commit()
 
     # Send payment confirmation if payment completed
     if payment.status == "completed":
