@@ -12,6 +12,8 @@ from app.models.vehicle import Vehicle
 from app.models.booking import Booking
 from app.models.parking_spot import ParkingSpot
 from app.models.parking_zone import ParkingZone
+from app.models.payment import Payment
+from app.models.tariff_plan import TariffPlan
 from app.schemas.booking import (
     BookingCreate,
     BookingResponse,
@@ -174,10 +176,46 @@ async def create_booking(
     await db.commit()
     await db.refresh(new_booking)
 
-    # Get zone for notification
+    # Get zone for notification and payment calculation
     zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
     zone_result = await db.execute(zone_stmt)
     zone = zone_result.scalar_one()
+
+    # Calculate payment amount
+    duration_hours = (booking_data.end_time - booking_data.start_time).total_seconds() / 3600
+    amount = 0.0
+
+    if zone.tariff_id:
+        # Get tariff
+        tariff_stmt = select(TariffPlan).where(TariffPlan.tariff_id == zone.tariff_id)
+        tariff_result = await db.execute(tariff_stmt)
+        tariff = tariff_result.scalar_one_or_none()
+
+        if tariff:
+            # Calculate cost
+            if duration_hours >= 24 and tariff.price_per_day:
+                # Use daily rate if available
+                days = duration_hours / 24
+                amount = float(tariff.price_per_day) * days
+            else:
+                # Use hourly rate
+                amount = float(tariff.price_per_hour) * duration_hours
+    else:
+        # Default rate if no tariff
+        amount = 50.0 * duration_hours
+
+    # Create payment for booking
+    new_payment = Payment(
+        booking_id=new_booking.booking_id,
+        customer_id=current_customer.customer_id,
+        amount=round(amount, 2),
+        payment_method="pending",
+        status="pending"
+    )
+
+    db.add(new_payment)
+    await db.commit()
+    await db.refresh(new_payment)
 
     # Send booking confirmation notification
     await notification_service.send_booking_confirmation(

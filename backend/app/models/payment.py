@@ -12,10 +12,11 @@ class Payment(Base):
     __tablename__ = "payments"
 
     payment_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("parking_sessions.session_id"), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("parking_sessions.session_id"), nullable=True, index=True)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.booking_id"), nullable=True, index=True)
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.customer_id"), nullable=False, index=True)
     amount = Column(Numeric(10, 2), nullable=False)
-    payment_method = Column(String(50), nullable=False)  # card, cash, online
+    payment_method = Column(String(50), nullable=False, default="pending")  # card, cash, online, pending
     status = Column(String(50), nullable=False, default="pending")  # pending, completed, failed, refunded
     transaction_id = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -23,6 +24,7 @@ class Payment(Base):
 
     # Relationships
     session = relationship("ParkingSession", back_populates="payments")
+    booking = relationship("Booking", back_populates="payments")
     customer = relationship("Customer", back_populates="payments")
 
     def __repr__(self):

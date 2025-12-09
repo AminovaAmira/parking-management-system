@@ -26,6 +26,7 @@ class Booking(Base):
     vehicle = relationship("Vehicle", back_populates="bookings")
     spot = relationship("ParkingSpot", back_populates="bookings")
     parking_sessions = relationship("ParkingSession", back_populates="booking")
+    payments = relationship("Payment", back_populates="booking")
 
     def __repr__(self):
         return f"<Booking {self.booking_id} - {self.status}>"
