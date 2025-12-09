@@ -15,6 +15,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Chip,
   CircularProgress,
   Alert,
@@ -50,6 +51,12 @@ const DashboardPage = () => {
   const [selectedZone, setSelectedZone] = useState('');
   const [loadingSpots, setLoadingSpots] = useState(false);
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'map'
+
+  // Pagination states
+  const [bookingsPage, setBookingsPage] = useState(0);
+  const [bookingsRowsPerPage, setBookingsRowsPerPage] = useState(10);
+  const [paymentsPage, setPaymentsPage] = useState(0);
+  const [paymentsRowsPerPage, setPaymentsRowsPerPage] = useState(10);
   const [newVehicle, setNewVehicle] = useState({
     license_plate: '',
     make: '',
@@ -553,52 +560,70 @@ const DashboardPage = () => {
           {bookings.length === 0 ? (
             <Typography color="text.secondary">Нет активных бронирований</Typography>
           ) : (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Место</TableCell>
-                    <TableCell>Начало</TableCell>
-                    <TableCell>Окончание</TableCell>
-                    <TableCell>Статус</TableCell>
-                    <TableCell>Действия</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {bookings.map((booking) => (
-                    <TableRow key={booking.booking_id}>
-                      <TableCell>
-                        <strong>{booking.spot?.spot_number || 'N/A'}</strong>
-                        <br />
-                        <Typography variant="caption" color="text.secondary">
-                          {booking.zone?.name || 'N/A'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{new Date(booking.start_time).toLocaleString('ru-RU')}</TableCell>
-                      <TableCell>{new Date(booking.end_time).toLocaleString('ru-RU')}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={getStatusText(booking.status)}
-                          color={getStatusColor(booking.status)}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {booking.status === 'pending' && (
-                          <Button
-                            size="small"
-                            color="error"
-                            onClick={() => handleCancelBooking(booking.booking_id)}
-                          >
-                            Отменить
-                          </Button>
-                        )}
-                      </TableCell>
+            <>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Место</TableCell>
+                      <TableCell>Начало</TableCell>
+                      <TableCell>Окончание</TableCell>
+                      <TableCell>Статус</TableCell>
+                      <TableCell>Действия</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {bookings
+                      .slice(bookingsPage * bookingsRowsPerPage, bookingsPage * bookingsRowsPerPage + bookingsRowsPerPage)
+                      .map((booking) => (
+                        <TableRow key={booking.booking_id}>
+                          <TableCell>
+                            <strong>{booking.spot?.spot_number || 'N/A'}</strong>
+                            <br />
+                            <Typography variant="caption" color="text.secondary">
+                              {booking.zone?.name || 'N/A'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>{new Date(booking.start_time).toLocaleString('ru-RU')}</TableCell>
+                          <TableCell>{new Date(booking.end_time).toLocaleString('ru-RU')}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={getStatusText(booking.status)}
+                              color={getStatusColor(booking.status)}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {booking.status === 'pending' && (
+                              <Button
+                                size="small"
+                                color="error"
+                                onClick={() => handleCancelBooking(booking.booking_id)}
+                              >
+                                Отменить
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                component="div"
+                count={bookings.length}
+                rowsPerPage={bookingsRowsPerPage}
+                page={bookingsPage}
+                onPageChange={(e, newPage) => setBookingsPage(newPage)}
+                onRowsPerPageChange={(e) => {
+                  setBookingsRowsPerPage(parseInt(e.target.value, 10));
+                  setBookingsPage(0);
+                }}
+                labelRowsPerPage="Строк на странице:"
+                labelDisplayedRows={({ from, to, count }) => `${from}-${to} из ${count}`}
+              />
+            </>
           )}
         </Paper>
 
@@ -610,61 +635,79 @@ const DashboardPage = () => {
           {payments.length === 0 ? (
             <Typography color="text.secondary">Нет платежей</Typography>
           ) : (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Дата</TableCell>
-                    <TableCell>Сумма</TableCell>
-                    <TableCell>Метод оплаты</TableCell>
-                    <TableCell>Статус</TableCell>
-                    <TableCell>ID транзакции</TableCell>
-                    <TableCell>Действия</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {payments.map((payment) => (
-                    <TableRow key={payment.payment_id}>
-                      <TableCell>
-                        {new Date(payment.created_at).toLocaleString('ru-RU')}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body1" fontWeight="bold">
-                          {parseFloat(payment.amount).toFixed(2)} ₽
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        {getPaymentMethodText(payment.payment_method)}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={getPaymentStatusText(payment.status)}
-                          color={getPaymentStatusColor(payment.status)}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="caption" color="text.secondary">
-                          {payment.transaction_id || '-'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        {payment.status === 'pending' && (
-                          <Button
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                            onClick={() => handlePayment(payment.payment_id, 'card')}
-                          >
-                            Оплатить
-                          </Button>
-                        )}
-                      </TableCell>
+            <>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Дата</TableCell>
+                      <TableCell>Сумма</TableCell>
+                      <TableCell>Метод оплаты</TableCell>
+                      <TableCell>Статус</TableCell>
+                      <TableCell>ID транзакции</TableCell>
+                      <TableCell>Действия</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {payments
+                      .slice(paymentsPage * paymentsRowsPerPage, paymentsPage * paymentsRowsPerPage + paymentsRowsPerPage)
+                      .map((payment) => (
+                        <TableRow key={payment.payment_id}>
+                          <TableCell>
+                            {new Date(payment.created_at).toLocaleString('ru-RU')}
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body1" fontWeight="bold">
+                              {parseFloat(payment.amount).toFixed(2)} ₽
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {getPaymentMethodText(payment.payment_method)}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={getPaymentStatusText(payment.status)}
+                              color={getPaymentStatusColor(payment.status)}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption" color="text.secondary">
+                              {payment.transaction_id || '-'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {payment.status === 'pending' && (
+                              <Button
+                                size="small"
+                                color="success"
+                                variant="outlined"
+                                onClick={() => handlePayment(payment.payment_id, 'card')}
+                              >
+                                Оплатить
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                rowsPerPageOptions={[5, 10, 25, 50]}
+                component="div"
+                count={payments.length}
+                rowsPerPage={paymentsRowsPerPage}
+                page={paymentsPage}
+                onPageChange={(e, newPage) => setPaymentsPage(newPage)}
+                onRowsPerPageChange={(e) => {
+                  setPaymentsRowsPerPage(parseInt(e.target.value, 10));
+                  setPaymentsPage(0);
+                }}
+                labelRowsPerPage="Строк на странице:"
+                labelDisplayedRows={({ from, to, count }) => `${from}-${to} из ${count}`}
+              />
+            </>
           )}
         </Paper>
 
@@ -813,10 +856,13 @@ const DashboardPage = () => {
             label="Начало бронирования"
             type="datetime-local"
             fullWidth
-            value={newBooking.start_time}
+            value={newBooking.start_time ? new Date(newBooking.start_time).toISOString().slice(0, 16) : ''}
             onChange={(e) => {
-              setNewBooking({ ...newBooking, start_time: e.target.value });
-              handleTimeChange();
+              if (e.target.value) {
+                const isoString = new Date(e.target.value).toISOString();
+                setNewBooking({ ...newBooking, start_time: isoString });
+                handleTimeChange();
+              }
             }}
             InputLabelProps={{
               shrink: true,
@@ -831,16 +877,19 @@ const DashboardPage = () => {
             label="Окончание бронирования"
             type="datetime-local"
             fullWidth
-            value={newBooking.end_time}
+            value={newBooking.end_time ? new Date(newBooking.end_time).toISOString().slice(0, 16) : ''}
             onChange={(e) => {
-              setNewBooking({ ...newBooking, end_time: e.target.value });
-              handleTimeChange();
+              if (e.target.value) {
+                const isoString = new Date(e.target.value).toISOString();
+                setNewBooking({ ...newBooking, end_time: isoString });
+                handleTimeChange();
+              }
             }}
             InputLabelProps={{
               shrink: true,
             }}
             inputProps={{
-              min: newBooking.start_time || new Date().toISOString().slice(0, 16)
+              min: newBooking.start_time ? new Date(newBooking.start_time).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16)
             }}
           />
 

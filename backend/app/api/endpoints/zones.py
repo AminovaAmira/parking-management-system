@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
 
@@ -24,7 +25,9 @@ async def get_parking_zones(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all parking zones"""
-    stmt = select(ParkingZone).where(ParkingZone.is_active == is_active)
+    stmt = select(ParkingZone).where(ParkingZone.is_active == is_active).options(
+        selectinload(ParkingZone.parking_spots)
+    )
     result = await db.execute(stmt)
     zones = result.scalars().all()
     return zones
@@ -36,7 +39,9 @@ async def get_parking_zone(
     db: AsyncSession = Depends(get_db)
 ):
     """Get a specific parking zone"""
-    stmt = select(ParkingZone).where(ParkingZone.zone_id == zone_id)
+    stmt = select(ParkingZone).where(ParkingZone.zone_id == zone_id).options(
+        selectinload(ParkingZone.parking_spots)
+    )
     result = await db.execute(stmt)
     zone = result.scalar_one_or_none()
 
@@ -201,9 +206,6 @@ async def create_parking_spot(
     # Create new spot
     new_spot = ParkingSpot(**spot_data.model_dump())
     db.add(new_spot)
-
-    # Update zone's available spots count
-    zone.available_spots += 1
 
     await db.commit()
     await db.refresh(new_spot)
