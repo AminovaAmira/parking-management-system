@@ -36,6 +36,7 @@ import parkingService from '../services/parkingService';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import OCRUpload from '../components/OCRUpload';
 import ParkingMapView from '../components/ParkingMapView';
+import PaymentDialog from '../components/PaymentDialog';
 
 // Set dayjs locale to Russian
 dayjs.locale('ru');
@@ -55,6 +56,8 @@ const DashboardPage = () => {
   // Dialog states
   const [openVehicleDialog, setOpenVehicleDialog] = useState(false);
   const [openBookingDialog, setOpenBookingDialog] = useState(false);
+  const [openPaymentDialog, setOpenPaymentDialog] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   const [availableSpots, setAvailableSpots] = useState([]);
   const [selectedZone, setSelectedZone] = useState('');
   const [loadingSpots, setLoadingSpots] = useState(false);
@@ -245,18 +248,27 @@ const DashboardPage = () => {
     }
   };
 
+  const handleOpenPaymentDialog = (payment) => {
+    setSelectedPayment(payment);
+    setOpenPaymentDialog(true);
+  };
+
+  const handleClosePaymentDialog = () => {
+    setOpenPaymentDialog(false);
+    setSelectedPayment(null);
+  };
+
   const handlePayment = async (paymentId, paymentMethod) => {
-    if (window.confirm(`Подтвердить оплату через ${getPaymentMethodText(paymentMethod)}?`)) {
-      try {
-        // Simulate payment processing
-        await parkingService.updatePaymentStatus(paymentId, {
-          status: 'completed',
-          transaction_id: `TXN-${Date.now()}`
-        });
-        await loadDashboardData();
-      } catch (err) {
-        setError(err.message || 'Ошибка обработки платежа');
-      }
+    try {
+      // Simulate payment processing
+      await parkingService.updatePaymentStatus(paymentId, {
+        status: 'completed',
+        transaction_id: `TXN-${Date.now()}`
+      });
+      await loadDashboardData();
+    } catch (err) {
+      setError(err.message || 'Ошибка обработки платежа');
+      throw err;
     }
   };
 
@@ -710,8 +722,8 @@ const DashboardPage = () => {
                               <Button
                                 size="small"
                                 color="success"
-                                variant="outlined"
-                                onClick={() => handlePayment(payment.payment_id, 'card')}
+                                variant="contained"
+                                onClick={() => handleOpenPaymentDialog(payment)}
                               >
                                 Оплатить
                               </Button>
@@ -997,6 +1009,14 @@ const DashboardPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Payment Dialog */}
+      <PaymentDialog
+        open={openPaymentDialog}
+        onClose={handleClosePaymentDialog}
+        payment={selectedPayment}
+        onPaymentSuccess={handlePayment}
+      />
     </Container>
   );
 };
