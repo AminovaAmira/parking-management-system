@@ -4,7 +4,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -157,7 +157,7 @@ async def create_booking(
             detail="End time must be after start time"
         )
 
-    if booking_data.start_time < datetime.utcnow():
+    if booking_data.start_time < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Start time must be in the future"
