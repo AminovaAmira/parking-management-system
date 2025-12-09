@@ -653,11 +653,10 @@ const DashboardPage = () => {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Дата</TableCell>
+                      <TableCell>Место/Период</TableCell>
                       <TableCell>Сумма</TableCell>
                       <TableCell>Метод оплаты</TableCell>
                       <TableCell>Статус</TableCell>
-                      <TableCell>ID транзакции</TableCell>
                       <TableCell>Действия</TableCell>
                     </TableRow>
                   </TableHead>
@@ -667,7 +666,29 @@ const DashboardPage = () => {
                       .map((payment) => (
                         <TableRow key={payment.payment_id}>
                           <TableCell>
-                            {new Date(payment.created_at).toLocaleString('ru-RU')}
+                            {payment.spot && payment.zone ? (
+                              <>
+                                <Typography variant="body2" fontWeight="bold">
+                                  Место {payment.spot.spot_number}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  {payment.zone.name}
+                                </Typography>
+                                {payment.booking && (
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    {new Date(payment.booking.start_time).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
+                                    {' '}
+                                    {new Date(payment.booking.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                    {' - '}
+                                    {new Date(payment.booking.end_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                  </Typography>
+                                )}
+                              </>
+                            ) : (
+                              <Typography variant="caption" color="text.secondary">
+                                {new Date(payment.created_at).toLocaleDateString('ru-RU')}
+                              </Typography>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Typography variant="body1" fontWeight="bold">
@@ -683,11 +704,6 @@ const DashboardPage = () => {
                               color={getPaymentStatusColor(payment.status)}
                               size="small"
                             />
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="caption" color="text.secondary">
-                              {payment.transaction_id || '-'}
-                            </Typography>
                           </TableCell>
                           <TableCell>
                             {payment.status === 'pending' && (
