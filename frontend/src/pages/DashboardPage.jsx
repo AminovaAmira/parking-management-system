@@ -197,13 +197,6 @@ const DashboardPage = () => {
     }
   };
 
-  const handleTimeChange = () => {
-    // Reset zone and spots when time changes
-    setSelectedZone('');
-    setAvailableSpots([]);
-    setNewBooking({ ...newBooking, spot_id: '' });
-  };
-
   const handleSpotSelectFromMap = (spot) => {
     setNewBooking({ ...newBooking, spot_id: spot.spot_id });
   };
