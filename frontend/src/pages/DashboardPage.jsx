@@ -26,11 +26,19 @@ import {
   TextField,
   MenuItem,
 } from '@mui/material';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import dayjs from 'dayjs';
+import 'dayjs/locale/ru';
 import { useAuth } from '../context/AuthContext';
 import parkingService from '../services/parkingService';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import OCRUpload from '../components/OCRUpload';
 import ParkingMapView from '../components/ParkingMapView';
+
+// Set dayjs locale to Russian
+dayjs.locale('ru');
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -67,8 +75,8 @@ const DashboardPage = () => {
   const [newBooking, setNewBooking] = useState({
     spot_id: '',
     vehicle_id: '',
-    start_time: '',
-    end_time: '',
+    start_time: null,
+    end_time: null,
   });
 
   useEffect(() => {
@@ -166,9 +174,9 @@ const DashboardPage = () => {
 
     try {
       setLoadingSpots(true);
-      // Convert local datetime to ISO for API request
-      const startTimeISO = new Date(newBooking.start_time).toISOString();
-      const endTimeISO = new Date(newBooking.end_time).toISOString();
+      // Convert dayjs to ISO string for API request
+      const startTimeISO = newBooking.start_time.toISOString();
+      const endTimeISO = newBooking.end_time.toISOString();
 
       // Get spots available for the selected time range
       const spots = await parkingService.getAvailableSpotsForTime(
@@ -208,11 +216,12 @@ const DashboardPage = () => {
         return;
       }
 
-      // Convert local datetime to ISO string for API
+      // Convert dayjs to ISO string for API
       const bookingData = {
-        ...newBooking,
-        start_time: new Date(newBooking.start_time).toISOString(),
-        end_time: new Date(newBooking.end_time).toISOString(),
+        vehicle_id: newBooking.vehicle_id,
+        spot_id: newBooking.spot_id,
+        start_time: newBooking.start_time.toISOString(),
+        end_time: newBooking.end_time.toISOString(),
       };
 
       await parkingService.createBooking(bookingData);
@@ -220,8 +229,8 @@ const DashboardPage = () => {
       setNewBooking({
         spot_id: '',
         vehicle_id: '',
-        start_time: '',
-        end_time: '',
+        start_time: null,
+        end_time: null,
       });
       setSelectedZone('');
       setAvailableSpots([]);
@@ -862,47 +871,45 @@ const DashboardPage = () => {
             ))}
           </TextField>
 
-          <TextField
-            margin="dense"
-            label="Начало бронирования"
-            type="datetime-local"
-            fullWidth
-            value={newBooking.start_time || ''}
-            onChange={(e) => {
-              const value = e.target.value;
-              // Update start_time and reset zone/spot_id in a single state update
-              setNewBooking({ ...newBooking, start_time: value, spot_id: '' });
-              setSelectedZone('');
-              setAvailableSpots([]);
-            }}
-            InputLabelProps={{
-              shrink: true,
-            }}
-            inputProps={{
-              min: new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-            }}
-          />
+          <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="ru">
+            <DateTimePicker
+              label="Начало бронирования"
+              value={newBooking.start_time}
+              onChange={(newValue) => {
+                setNewBooking({ ...newBooking, start_time: newValue, spot_id: '' });
+                setSelectedZone('');
+                setAvailableSpots([]);
+              }}
+              minDateTime={dayjs()}
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  margin: "dense",
+                },
+              }}
+              ampm={false}
+            />
+          </LocalizationProvider>
 
-          <TextField
-            margin="dense"
-            label="Окончание бронирования"
-            type="datetime-local"
-            fullWidth
-            value={newBooking.end_time || ''}
-            onChange={(e) => {
-              const value = e.target.value;
-              // Update end_time and reset zone/spot_id in a single state update
-              setNewBooking({ ...newBooking, end_time: value, spot_id: '' });
-              setSelectedZone('');
-              setAvailableSpots([]);
-            }}
-            InputLabelProps={{
-              shrink: true,
-            }}
-            inputProps={{
-              min: newBooking.start_time || new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-            }}
-          />
+          <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="ru">
+            <DateTimePicker
+              label="Окончание бронирования"
+              value={newBooking.end_time}
+              onChange={(newValue) => {
+                setNewBooking({ ...newBooking, end_time: newValue, spot_id: '' });
+                setSelectedZone('');
+                setAvailableSpots([]);
+              }}
+              minDateTime={newBooking.start_time || dayjs()}
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  margin: "dense",
+                },
+              }}
+              ampm={false}
+            />
+          </LocalizationProvider>
 
           {viewMode === 'list' ? (
             <>
