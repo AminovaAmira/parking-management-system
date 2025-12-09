@@ -166,11 +166,15 @@ const DashboardPage = () => {
 
     try {
       setLoadingSpots(true);
+      // Convert local datetime to ISO for API request
+      const startTimeISO = new Date(newBooking.start_time).toISOString();
+      const endTimeISO = new Date(newBooking.end_time).toISOString();
+
       // Get spots available for the selected time range
       const spots = await parkingService.getAvailableSpotsForTime(
         zoneId,
-        newBooking.start_time,
-        newBooking.end_time
+        startTimeISO,
+        endTimeISO
       );
       setAvailableSpots(spots);
 
@@ -204,7 +208,14 @@ const DashboardPage = () => {
         return;
       }
 
-      await parkingService.createBooking(newBooking);
+      // Convert local datetime to ISO string for API
+      const bookingData = {
+        ...newBooking,
+        start_time: new Date(newBooking.start_time).toISOString(),
+        end_time: new Date(newBooking.end_time).toISOString(),
+      };
+
+      await parkingService.createBooking(bookingData);
       setOpenBookingDialog(false);
       setNewBooking({
         spot_id: '',
@@ -856,19 +867,17 @@ const DashboardPage = () => {
             label="Начало бронирования"
             type="datetime-local"
             fullWidth
-            value={newBooking.start_time ? new Date(newBooking.start_time).toISOString().slice(0, 16) : ''}
+            value={newBooking.start_time || ''}
             onChange={(e) => {
-              if (e.target.value) {
-                const isoString = new Date(e.target.value).toISOString();
-                setNewBooking({ ...newBooking, start_time: isoString });
-                handleTimeChange();
-              }
+              const value = e.target.value;
+              setNewBooking({ ...newBooking, start_time: value });
+              handleTimeChange();
             }}
             InputLabelProps={{
               shrink: true,
             }}
             inputProps={{
-              min: new Date().toISOString().slice(0, 16)
+              min: new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
             }}
           />
 
@@ -877,19 +886,17 @@ const DashboardPage = () => {
             label="Окончание бронирования"
             type="datetime-local"
             fullWidth
-            value={newBooking.end_time ? new Date(newBooking.end_time).toISOString().slice(0, 16) : ''}
+            value={newBooking.end_time || ''}
             onChange={(e) => {
-              if (e.target.value) {
-                const isoString = new Date(e.target.value).toISOString();
-                setNewBooking({ ...newBooking, end_time: isoString });
-                handleTimeChange();
-              }
+              const value = e.target.value;
+              setNewBooking({ ...newBooking, end_time: value });
+              handleTimeChange();
             }}
             InputLabelProps={{
               shrink: true,
             }}
             inputProps={{
-              min: newBooking.start_time ? new Date(newBooking.start_time).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16)
+              min: newBooking.start_time || new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
             }}
           />
 
