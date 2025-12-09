@@ -5,6 +5,37 @@ from typing import Optional
 from decimal import Decimal
 
 
+class SpotDetail(BaseModel):
+    """Детали парковочного места"""
+    spot_id: UUID
+    spot_number: str
+    spot_type: str
+
+    class Config:
+        from_attributes = True
+
+
+class ZoneDetail(BaseModel):
+    """Детали парковочной зоны"""
+    zone_id: UUID
+    name: str
+    address: str
+
+    class Config:
+        from_attributes = True
+
+
+class BookingDetail(BaseModel):
+    """Детали бронирования"""
+    booking_id: UUID
+    start_time: datetime
+    end_time: datetime
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
 class PaymentBase(BaseModel):
     """Base payment schema"""
     amount: Decimal = Field(..., ge=0)
@@ -33,6 +64,16 @@ class PaymentResponse(PaymentBase):
     transaction_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaymentDetailResponse(PaymentResponse):
+    """Детальная схема ответа платежа с информацией о бронировании и месте"""
+    booking: Optional[BookingDetail] = None
+    spot: Optional[SpotDetail] = None
+    zone: Optional[ZoneDetail] = None
 
     class Config:
         from_attributes = True

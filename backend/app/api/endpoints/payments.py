@@ -14,7 +14,15 @@ from app.models.parking_spot import ParkingSpot
 from app.models.parking_zone import ParkingZone
 from app.models.tariff_plan import TariffPlan
 from app.models.booking import Booking
-from app.schemas.payment import PaymentCreate, PaymentResponse, PaymentUpdate
+from app.schemas.payment import (
+    PaymentCreate,
+    PaymentResponse,
+    PaymentUpdate,
+    PaymentDetailResponse,
+    SpotDetail,
+    ZoneDetail,
+    BookingDetail
+)
 from app.core.dependencies import get_current_customer
 from app.services.notification_service import notification_service
 from app.services.mock_payment_service import mock_payment_service
@@ -45,13 +53,13 @@ def calculate_parking_cost(session: ParkingSession, tariff: TariffPlan) -> Decim
     return cost.quantize(Decimal('0.01'))
 
 
-@router.get("/", response_model=List[PaymentResponse])
+@router.get("/", response_model=List[PaymentDetailResponse])
 async def get_my_payments(
     current_customer: Customer = Depends(get_current_customer),
     status: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all payments for current customer"""
+    """Get all payments for current customer with detailed information"""
     stmt = select(Payment).where(Payment.customer_id == current_customer.customer_id)
 
     if status:
@@ -61,7 +69,71 @@ async def get_my_payments(
 
     result = await db.execute(stmt)
     payments = result.scalars().all()
-    return payments
+
+    # Build detailed response
+    detailed_payments = []
+    for payment in payments:
+        booking_detail = None
+        spot_detail = None
+        zone_detail = None
+
+        # If payment is for a booking, get booking details
+        if payment.booking_id:
+            # Get booking
+            booking_stmt = select(Booking).where(Booking.booking_id == payment.booking_id)
+            booking_result = await db.execute(booking_stmt)
+            booking = booking_result.scalar_one_or_none()
+
+            if booking:
+                booking_detail = BookingDetail(
+                    booking_id=booking.booking_id,
+                    start_time=booking.start_time,
+                    end_time=booking.end_time,
+                    status=booking.status
+                )
+
+                # Get spot
+                spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == booking.spot_id)
+                spot_result = await db.execute(spot_stmt)
+                spot = spot_result.scalar_one_or_none()
+
+                if spot:
+                    spot_detail = SpotDetail(
+                        spot_id=spot.spot_id,
+                        spot_number=spot.spot_number,
+                        spot_type=spot.spot_type
+                    )
+
+                    # Get zone
+                    zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+                    zone_result = await db.execute(zone_stmt)
+                    zone = zone_result.scalar_one_or_none()
+
+                    if zone:
+                        zone_detail = ZoneDetail(
+                            zone_id=zone.zone_id,
+                            name=zone.name,
+                            address=zone.address
+                        )
+
+        detailed_payment = PaymentDetailResponse(
+            payment_id=payment.payment_id,
+            session_id=payment.session_id,
+            booking_id=payment.booking_id,
+            customer_id=payment.customer_id,
+            amount=payment.amount,
+            payment_method=payment.payment_method,
+            status=payment.status,
+            transaction_id=payment.transaction_id,
+            created_at=payment.created_at,
+            updated_at=payment.updated_at,
+            booking=booking_detail,
+            spot=spot_detail,
+            zone=zone_detail
+        )
+        detailed_payments.append(detailed_payment)
+
+    return detailed_payments
 
 
 @router.post("/", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
