@@ -27,17 +27,37 @@ def get_easyocr_reader():
     return _easyocr_reader
 
 
-def preprocess_image_for_ocr(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def upscale_image(image: np.ndarray, scale_factor: float = 2.0) -> np.ndarray:
+    """
+    Увеличение изображения для лучшего распознавания мелких символов
+    """
+    height, width = image.shape[:2]
+    new_width = int(width * scale_factor)
+    new_height = int(height * scale_factor)
+
+    # Используем INTER_CUBIC для лучшего качества при увеличении
+    upscaled = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+    return upscaled
+
+
+def preprocess_image_for_ocr(image: np.ndarray, upscale: bool = True) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Продвинутая предобработка изображения для улучшения OCR
 
-    Возвращает три варианта предобработанного изображения для повышения точности
+    Возвращает четыре варианта предобработанного изображения для повышения точности
     """
     # Конвертация в grayscale
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
         gray = image.copy()
+
+    # Увеличение изображения для лучшего распознавания мелких символов (код региона)
+    if upscale and min(gray.shape) < 100:
+        scale = 100.0 / min(gray.shape)
+        gray = upscale_image(gray, scale_factor=max(2.0, scale))
+    elif upscale:
+        gray = upscale_image(gray, scale_factor=2.0)
 
     # Вариант 1: Увеличение контраста с адаптивной бинаризацией
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -63,7 +83,15 @@ def preprocess_image_for_ocr(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
-    return binary1, binary2, binary3
+    # Вариант 4: Увеличенное изображение с контрастом (для мелких символов)
+    sharp_kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+    sharpened = cv2.filter2D(enhanced, -1, sharp_kernel)
+    _, binary4 = cv2.threshold(
+        sharpened, 0, 255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+
+    return binary1, binary2, binary3, binary4
 
 
 def detect_license_plate_region(image: np.ndarray) -> Optional[np.ndarray]:
@@ -109,7 +137,37 @@ def detect_license_plate_region(image: np.ndarray) -> Optional[np.ndarray]:
         return None
 
 
-def preprocess_license_plate_text(text: str) -> str:
+def fix_region_code(text: str) -> str:
+    """
+    Попытка исправить код региона в конце номера
+
+    Российские коды регионов: 01-99, 102-199, 702, 750, 777, 799 и др.
+    """
+    russian_letters = 'АВЕКМНОРСТУХ'
+
+    # Паттерн: буква + 3 цифры + 2 буквы + что-то в конце
+    match = re.match(f'^([{russian_letters}])(\\d{{3}})([{russian_letters}]{{2}})(.+)$', text)
+
+    if match:
+        letter1 = match.group(1)
+        digits = match.group(2)
+        letters = match.group(3)
+        region_part = match.group(4)
+
+        # Очищаем код региона от букв (иногда OCR добавляет буквы)
+        region_cleaned = re.sub(r'[^0-9]', '', region_part)
+
+        # Если получилось 1-3 цифры, используем
+        if 1 <= len(region_cleaned) <= 3:
+            # Дополняем до 2 цифр нулем спереди, если нужно
+            if len(region_cleaned) == 1:
+                region_cleaned = '0' + region_cleaned
+            return f"{letter1}{digits}{letters}{region_cleaned}"
+
+    return text
+
+
+def preprocess_license_plate_text(text: str, try_fix_region: bool = True) -> str:
     """
     Предобработка текста OCR для извлечения номерного знака
 
@@ -118,22 +176,12 @@ def preprocess_license_plate_text(text: str) -> str:
     # Удаление пробелов и конвертация в верхний регистр
     text = text.upper().strip()
 
-    # Замена похожих символов (часто OCR путает)
-    replacements = {
-        'O': '0',  # O -> 0
-        'I': '1',  # I -> 1
-        'Z': '2',  # Z -> 2
-        'S': '5',  # S -> 5
-        'G': '6',  # G -> 6
-        'B': '8',  # B -> 8
-        'Q': '0',  # Q -> 0
-    }
-
-    # Применяем замены только для цифр (не для букв в номере)
-    # Сначала извлекаем возможные буквы и цифры отдельно
-
     # Удаление спецсимволов, оставляем только буквы и цифры
     text = re.sub(r'[^A-ZА-Я0-9]', '', text)
+
+    # Попытка исправить код региона
+    if try_fix_region and len(text) >= 6:
+        text = fix_region_code(text)
 
     return text
 
@@ -192,6 +240,72 @@ def extract_with_easyocr(image: np.ndarray) -> Optional[str]:
         return None
 
 
+def try_segment_and_recognize(image: np.ndarray, lang: str = 'rus+eng') -> Optional[str]:
+    """
+    Попытка сегментировать номер на основную часть и код региона
+    и распознать их отдельно
+    """
+    try:
+        height, width = image.shape[:2]
+
+        # Российский номер примерно: 75% основная часть, 25% код региона
+        split_point = int(width * 0.72)
+
+        # Основная часть (А123БВ)
+        main_part = image[:, :split_point]
+
+        # Код региона (77 или 777)
+        region_part = image[:, split_point:]
+
+        # Увеличиваем код региона сильнее, так как он меньше
+        region_upscaled = upscale_image(region_part, scale_factor=3.0)
+
+        # Распознаём основную часть
+        russian_letters = 'АВЕКМНОРСТУХ'
+        main_config = f'--oem 3 --psm 7 -c tessedit_char_whitelist={russian_letters}0123456789'
+
+        main_variants = preprocess_image_for_ocr(main_part, upscale=True)
+        main_text = None
+
+        for variant in main_variants[:2]:  # Только первые 2 варианта для скорости
+            pil_image = Image.fromarray(variant)
+            text = pytesseract.image_to_string(pil_image, lang=lang, config=main_config)
+            text = re.sub(r'[^A-ZА-Я0-9]', '', text.upper().strip())
+
+            if len(text) >= 6:
+                main_text = text
+                break
+
+        # Распознаём код региона (только цифры)
+        region_config = '--oem 3 --psm 8 -c tessedit_char_whitelist=0123456789'
+
+        region_variants = preprocess_image_for_ocr(region_upscaled, upscale=False)
+        region_text = None
+
+        for variant in region_variants:
+            pil_image = Image.fromarray(variant)
+            text = pytesseract.image_to_string(pil_image, lang='eng', config=region_config)
+            text = re.sub(r'[^0-9]', '', text.strip())
+
+            if 1 <= len(text) <= 3:
+                # Дополняем до 2 цифр если 1 цифра
+                if len(text) == 1:
+                    text = '0' + text
+                region_text = text
+                break
+
+        # Объединяем результаты
+        if main_text and region_text:
+            combined = main_text + region_text
+            logger.info(f"Segmented recognition: main={main_text}, region={region_text}, combined={combined}")
+            return combined
+
+        return None
+    except Exception as e:
+        logger.debug(f"Segmentation failed: {str(e)}")
+        return None
+
+
 def extract_with_tesseract(image: np.ndarray, lang: str = 'rus+eng') -> Optional[str]:
     """
     Распознавание номера с помощью Tesseract OCR
@@ -212,7 +326,7 @@ def extract_with_tesseract(image: np.ndarray, lang: str = 'rus+eng') -> Optional
             pil_image = Image.fromarray(variant)
 
             # OCR с разными PSM режимами
-            for psm in [7, 8, 6]:  # 7=single line, 8=single word, 6=single block
+            for psm in [7, 8, 6, 13]:  # 7=single line, 8=single word, 6=single block, 13=raw line
                 try:
                     custom_config = config.replace('--psm 7', f'--psm {psm}')
                     text = pytesseract.image_to_string(pil_image, lang=lang, config=custom_config)
@@ -231,6 +345,19 @@ def extract_with_tesseract(image: np.ndarray, lang: str = 'rus+eng') -> Optional
                 except Exception as e:
                     logger.debug(f"Tesseract PSM {psm} failed: {str(e)}")
                     continue
+
+        # Если не получилось, пробуем сегментацию
+        if not best_result or not validate_russian_license_plate(best_result):
+            segmented_result = try_segment_and_recognize(image, lang)
+            if segmented_result:
+                segmented_plate = preprocess_license_plate_text(segmented_result)
+                if segmented_plate and len(segmented_plate) >= 8:
+                    confidence = len(segmented_plate)
+                    if validate_russian_license_plate(segmented_plate):
+                        confidence += 10
+
+                    if confidence > max_confidence:
+                        best_result = segmented_plate
 
         return best_result if best_result else None
     except Exception as e:
