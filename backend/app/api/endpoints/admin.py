@@ -3,10 +3,10 @@ Admin endpoints - управление системой (только для а�
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, cast, Date
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -79,6 +79,70 @@ async def get_admin_stats_overview(
             "occupancy_rate": round((occupied_spots / spots_count * 100) if spots_count > 0 else 0, 2)
         },
         "bookings_by_status": {row[0]: row[1] for row in bookings_by_status}
+    }
+
+
+@router.get("/stats/daily")
+async def get_daily_statistics(
+    days: int = Query(21, ge=7, le=90, description="Количество дней для отображения"),
+    admin: Customer = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Статистика по дням для графиков (выручка, бронирования, заполненность)"""
+
+    end_date = datetime.utcnow().date()
+    start_date = end_date - timedelta(days=days - 1)
+
+    # Выручка по дням
+    revenue_stmt = select(
+        cast(Payment.created_at, Date).label('date'),
+        func.sum(Payment.amount).label('revenue')
+    ).where(
+        and_(
+            Payment.status == 'completed',
+            cast(Payment.created_at, Date) >= start_date,
+            cast(Payment.created_at, Date) <= end_date
+        )
+    ).group_by(cast(Payment.created_at, Date)).order_by(cast(Payment.created_at, Date))
+
+    revenue_result = await db.execute(revenue_stmt)
+    revenue_by_date = {str(row.date): float(row.revenue) for row in revenue_result}
+
+    # Бронирования по дням (по времени начала)
+    bookings_stmt = select(
+        cast(Booking.start_time, Date).label('date'),
+        func.count(Booking.booking_id).label('count')
+    ).where(
+        and_(
+            cast(Booking.start_time, Date) >= start_date,
+            cast(Booking.start_time, Date) <= end_date,
+            Booking.status == 'confirmed'
+        )
+    ).group_by(cast(Booking.start_time, Date)).order_by(cast(Booking.start_time, Date))
+
+    bookings_result = await db.execute(bookings_stmt)
+    bookings_by_date = {str(row.date): row.count for row in bookings_result}
+
+    # Формируем данные для всех дней в диапазоне
+    daily_stats = []
+    current_date = start_date
+
+    while current_date <= end_date:
+        date_str = str(current_date)
+        daily_stats.append({
+            "date": date_str,
+            "revenue": revenue_by_date.get(date_str, 0),
+            "bookings": bookings_by_date.get(date_str, 0)
+        })
+        current_date += timedelta(days=1)
+
+    return {
+        "daily_stats": daily_stats,
+        "period": {
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "days": days
+        }
     }
 
 

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://parking_user:parking_pass@db:5432/parking_db"
 
     # Security settings
-    SECRET_KEY: str = "your-super-secret-key-change-this"
+    SECRET_KEY: str = "your-super-secret-key-change-this-in-production-123456789"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
