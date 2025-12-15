@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -171,7 +171,7 @@ async def start_parking_session(
             )
 
         # Check if booking time is valid (current time should be within booking period)
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         if current_time < booking.start_time:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -223,7 +223,7 @@ async def start_parking_session(
     session_dict = session_data.model_dump()
     # Auto-set entry_time to current time if not provided
     if not session_dict.get('entry_time'):
-        session_dict['entry_time'] = datetime.utcnow()
+        session_dict['entry_time'] = datetime.now(timezone.utc)
 
     new_session = ParkingSession(
         **session_dict,
@@ -572,19 +572,19 @@ async def calculate_current_cost(
         vehicle_id=session.vehicle_id,
         spot_id=session.spot_id,
         entry_time=session.entry_time,
-        exit_time=datetime.utcnow(),
+        exit_time=datetime.now(timezone.utc),
         booking_id=session.booking_id,
         status=session.status
     )
 
     cost = await calculate_session_cost(temp_session, db)
-    duration = datetime.utcnow() - session.entry_time
+    duration = datetime.now(timezone.utc) - session.entry_time
     duration_minutes = int(duration.total_seconds() / 60)
 
     return {
         "session_id": session_id,
         "entry_time": session.entry_time,
-        "current_time": datetime.utcnow(),
+        "current_time": datetime.now(timezone.utc),
         "duration_minutes": duration_minutes,
         "estimated_cost": float(cost),
         "status": session.status
@@ -705,7 +705,7 @@ async def get_monthly_statistics(
         return {"months": [], "sessions_count": [], "total_cost": [], "total_hours": []}
 
     # Calculate date range
-    end_date = datetime.utcnow()
+    end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=months * 30)
 
     # Get all completed sessions in range
