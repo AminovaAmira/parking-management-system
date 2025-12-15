@@ -105,7 +105,10 @@ const DashboardPage = () => {
         parkingService.getPayments(),
       ]);
 
-      setBookings(bookingsData);
+      // Filter out completed bookings from the list
+      const activeBookings = bookingsData.filter(b => b.status !== 'completed');
+
+      setBookings(activeBookings);
       setZones(zonesData);
       setVehicles(vehiclesData);
       setActiveSessions(sessionsData);
@@ -664,23 +667,30 @@ const DashboardPage = () => {
                           </TableCell>
                           <TableCell>
                             {booking.status === 'pending' && (
-                              <Button
-                                size="small"
-                                color="error"
-                                onClick={() => handleCancelBooking(booking.booking_id)}
-                              >
-                                Отменить
-                              </Button>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                <Button
+                                  size="small"
+                                  color="success"
+                                  variant="contained"
+                                  onClick={() => handleConfirmEntry(booking)}
+                                >
+                                  Подтвердить въезд
+                                </Button>
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  onClick={() => handleCancelBooking(booking.booking_id)}
+                                >
+                                  Отменить
+                                </Button>
+                              </Box>
                             )}
                             {booking.status === 'confirmed' && (
-                              <Button
-                                size="small"
+                              <Chip
+                                label="Парковка началась"
                                 color="success"
-                                variant="contained"
-                                onClick={() => handleConfirmEntry(booking)}
-                              >
-                                Подтвердить въезд
-                              </Button>
+                                size="small"
+                              />
                             )}
                           </TableCell>
                         </TableRow>
