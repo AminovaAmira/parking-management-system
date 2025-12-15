@@ -19,7 +19,7 @@ async def get_current_customer(
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Не удалось проверить учетные данные",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -54,6 +54,6 @@ async def get_current_admin(
     if not current_customer.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions. Admin access required."
+            detail="Недостаточно прав. Требуется доступ администратора."
         )
     return current_customer

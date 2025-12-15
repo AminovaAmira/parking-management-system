@@ -116,6 +116,11 @@ const ParkingMapView = ({ onSpotSelect, selectedSpotId }) => {
     sections[section].push(spot);
   });
 
+  // Sort spots within each section to maintain consistent positions
+  Object.keys(sections).forEach(section => {
+    sections[section].sort((a, b) => a.spot_number.localeCompare(b.spot_number));
+  });
+
   // Статистика
   const totalSpots = currentFloorSpots.length;
   const occupiedSpots = currentFloorSpots.filter(s => s.is_occupied).length;

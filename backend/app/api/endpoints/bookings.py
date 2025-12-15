@@ -70,6 +70,7 @@ async def get_my_bookings(
             customer_id=booking.customer_id,
             start_time=booking.start_time,
             end_time=booking.end_time,
+            estimated_cost=booking.estimated_cost,
             status=booking.status,
             created_at=booking.created_at,
             updated_at=booking.updated_at,
@@ -165,25 +166,14 @@ async def create_booking(
             detail="Start time must be in the future"
         )
 
-    # Create booking
-    new_booking = Booking(
-        customer_id=current_customer.customer_id,
-        **booking_data.model_dump(),
-        status="pending"
-    )
-
-    db.add(new_booking)
-    await db.commit()
-    await db.refresh(new_booking)
-
-    # Get zone for notification and payment calculation
+    # Get zone for cost calculation
     zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
     zone_result = await db.execute(zone_stmt)
     zone = zone_result.scalar_one()
 
-    # Calculate payment amount
+    # Calculate estimated cost
     duration_hours = (booking_data.end_time - booking_data.start_time).total_seconds() / 3600
-    amount = 0.0
+    estimated_cost = 0.0
 
     if zone.tariff_id:
         # Get tariff
@@ -196,26 +186,25 @@ async def create_booking(
             if duration_hours >= 24 and tariff.price_per_day:
                 # Use daily rate if available
                 days = duration_hours / 24
-                amount = float(tariff.price_per_day) * days
+                estimated_cost = float(tariff.price_per_day) * days
             else:
                 # Use hourly rate
-                amount = float(tariff.price_per_hour) * duration_hours
+                estimated_cost = float(tariff.price_per_hour) * duration_hours
     else:
         # Default rate if no tariff
-        amount = 50.0 * duration_hours
+        estimated_cost = 50.0 * duration_hours
 
-    # Create payment for booking
-    new_payment = Payment(
-        booking_id=new_booking.booking_id,
+    # Create booking with estimated cost
+    new_booking = Booking(
         customer_id=current_customer.customer_id,
-        amount=round(amount, 2),
-        payment_method="pending",
+        **booking_data.model_dump(),
+        estimated_cost=round(estimated_cost, 2),
         status="pending"
     )
 
-    db.add(new_payment)
+    db.add(new_booking)
     await db.commit()
-    await db.refresh(new_payment)
+    await db.refresh(new_booking)
 
     # Send booking confirmation notification
     await notification_service.send_booking_confirmation(

@@ -16,6 +16,7 @@ class ParkingZone(Base):
     name = Column(String(100), nullable=False)
     address = Column(String(255), nullable=False)
     total_spots = Column(Integer, nullable=False)
+    available_spots = Column(Integer, nullable=False, default=0)
     tariff_id = Column(UUID(as_uuid=True), ForeignKey("tariff_plans.tariff_id"))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -24,13 +25,6 @@ class ParkingZone(Base):
     # Relationships
     tariff = relationship("TariffPlan", back_populates="parking_zones")
     parking_spots = relationship("ParkingSpot", back_populates="zone", cascade="all, delete-orphan")
-
-    @property
-    def available_spots(self):
-        """Динамически вычисляем количество свободных мест"""
-        if not self.parking_spots:
-            return 0
-        return sum(1 for spot in self.parking_spots if spot.is_active and not spot.is_occupied)
 
     def __repr__(self):
         return f"<ParkingZone {self.name}>"

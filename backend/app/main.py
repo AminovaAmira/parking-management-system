@@ -1,6 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError, HTTPException
 from app.core.config import settings
+from app.core.exceptions import (
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler
+)
 
 # Create FastAPI application
 app = FastAPI(
@@ -23,6 +29,11 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Register custom exception handlers (русские сообщения об ошибках)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+
 
 @app.get("/")
 async def root():
@@ -44,7 +55,7 @@ async def health_check():
 
 
 # Import routers
-from app.api.endpoints import auth, vehicles, zones, bookings, sessions, payments, ocr, admin
+from app.api.endpoints import auth, vehicles, zones, bookings, sessions, payments, ocr, admin, balance
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -53,5 +64,6 @@ app.include_router(zones.router, prefix="/api/zones", tags=["Parking Zones"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["Parking Sessions"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
+app.include_router(balance.router, prefix="/api/balance", tags=["Balance"])
 app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR - License Plate Recognition"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])

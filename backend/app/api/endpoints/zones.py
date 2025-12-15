@@ -12,6 +12,7 @@ from app.schemas.parking import (
     ParkingZoneResponse,
     ParkingSpotResponse,
     ParkingSpotCreate,
+    ParkingSpotWithPriceResponse,
     AvailabilityRequest,
     AvailabilityResponse
 )
@@ -113,16 +114,17 @@ async def check_availability(
     }
 
 
-@router.get("/{zone_id}/available-spots", response_model=List[ParkingSpotResponse])
+@router.get("/{zone_id}/available-spots", response_model=List[ParkingSpotWithPriceResponse])
 async def get_available_spots_for_timerange(
     zone_id: UUID,
     start_time: str,
     end_time: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get available spots in a zone for a specific time range"""
+    """Get available spots in a zone for a specific time range with pricing info"""
     from datetime import datetime
     from app.models.booking import Booking
+    from app.models.tariff_plan import TariffPlan
     from sqlalchemy import and_, or_
 
     # Parse time strings
@@ -140,6 +142,24 @@ async def get_available_spots_for_timerange(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="End time must be after start time"
         )
+
+    # Get zone with tariff info
+    zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == zone_id)
+    zone_result = await db.execute(zone_stmt)
+    zone = zone_result.scalar_one_or_none()
+
+    if not zone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parking zone not found"
+        )
+
+    # Get tariff if exists
+    tariff = None
+    if zone.tariff_id:
+        tariff_stmt = select(TariffPlan).where(TariffPlan.tariff_id == zone.tariff_id)
+        tariff_result = await db.execute(tariff_stmt)
+        tariff = tariff_result.scalar_one_or_none()
 
     # Get all active spots in the zone
     stmt = select(ParkingSpot).where(
@@ -164,8 +184,23 @@ async def get_available_spots_for_timerange(
     # Get spot IDs that are booked
     booked_spot_ids = {booking.spot_id for booking in conflicting_bookings}
 
-    # Filter out booked spots
-    available_spots = [spot for spot in all_spots if spot.spot_id not in booked_spot_ids]
+    # Filter out booked spots and add pricing info
+    available_spots = []
+    for spot in all_spots:
+        if spot.spot_id not in booked_spot_ids:
+            spot_with_price = ParkingSpotWithPriceResponse(
+                spot_id=spot.spot_id,
+                zone_id=spot.zone_id,
+                spot_number=spot.spot_number,
+                spot_type=spot.spot_type,
+                is_active=spot.is_active,
+                is_occupied=spot.is_occupied,
+                created_at=spot.created_at,
+                updated_at=spot.updated_at,
+                price_per_hour=tariff.price_per_hour if tariff else None,
+                price_per_day=tariff.price_per_day if tariff else None
+            )
+            available_spots.append(spot_with_price)
 
     return available_spots
 

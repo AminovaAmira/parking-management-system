@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from uuid import UUID
 from typing import Optional
+from decimal import Decimal
 
 
 class BookingBase(BaseModel):
@@ -28,6 +29,7 @@ class BookingResponse(BookingBase):
     """Schema for booking response"""
     booking_id: UUID
     customer_id: UUID
+    estimated_cost: Decimal
     status: str
     created_at: datetime
     updated_at: datetime
@@ -79,6 +81,7 @@ class BookingDetailResponse(BaseModel):
     customer_id: UUID
     start_time: datetime
     end_time: datetime
+    estimated_cost: Decimal
     status: str
     created_at: datetime
     updated_at: datetime

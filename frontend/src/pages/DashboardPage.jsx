@@ -37,13 +37,14 @@ import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import OCRUpload from '../components/OCRUpload';
 import ParkingMapView from '../components/ParkingMapView';
 import PaymentDialog from '../components/PaymentDialog';
+import BalanceTopUpDialog from '../components/BalanceTopUpDialog';
 
 // Set dayjs locale to Russian
 dayjs.locale('ru');
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, updateUser } = useAuth();
 
   const [bookings, setBookings] = useState([]);
   const [zones, setZones] = useState([]);
@@ -57,6 +58,7 @@ const DashboardPage = () => {
   const [openVehicleDialog, setOpenVehicleDialog] = useState(false);
   const [openBookingDialog, setOpenBookingDialog] = useState(false);
   const [openPaymentDialog, setOpenPaymentDialog] = useState(false);
+  const [openBalanceDialog, setOpenBalanceDialog] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [availableSpots, setAvailableSpots] = useState([]);
   const [selectedZone, setSelectedZone] = useState('');
@@ -70,7 +72,7 @@ const DashboardPage = () => {
   const [paymentsRowsPerPage, setPaymentsRowsPerPage] = useState(10);
   const [newVehicle, setNewVehicle] = useState({
     license_plate: '',
-    make: '',
+    brand: '',
     model: '',
     color: '',
     vehicle_type: 'sedan',
@@ -126,7 +128,7 @@ const DashboardPage = () => {
       setOpenVehicleDialog(false);
       setNewVehicle({
         license_plate: '',
-        make: '',
+        brand: '',
         model: '',
         color: '',
         vehicle_type: 'sedan',
@@ -155,6 +157,22 @@ const DashboardPage = () => {
         await loadDashboardData();
       } catch (err) {
         setError(err.message || 'Ошибка отмены бронирования');
+      }
+    }
+  };
+
+  const handleConfirmEntry = async (booking) => {
+    if (window.confirm('Подтвердить въезд на территорию? Начнется парковочная сессия.')) {
+      try {
+        // Создаем парковочную сессию с привязкой к бронированию
+        await parkingService.startSession({
+          vehicle_id: booking.vehicle.vehicle_id,
+          spot_id: booking.spot.spot_id,
+          booking_id: booking.booking_id
+        });
+        await loadDashboardData();
+      } catch (err) {
+        setError(err.message || 'Ошибка подтверждения въезда');
       }
     }
   };
@@ -272,6 +290,13 @@ const DashboardPage = () => {
     }
   };
 
+  const handleBalanceTopUpSuccess = async () => {
+    // Refresh user data to get updated balance
+    await updateUser();
+    // Reload dashboard data
+    await loadDashboardData();
+  };
+
   const getPaymentMethodText = (method) => {
     switch (method) {
       case 'card':
@@ -385,6 +410,21 @@ const DashboardPage = () => {
               <Typography variant="body1" color="text.secondary">
                 {user.email}
               </Typography>
+              <Box sx={{ mt: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Chip
+                  label={`Баланс: ${parseFloat(user.balance || 0).toFixed(2)} ₽`}
+                  color="success"
+                  sx={{ fontWeight: 'bold' }}
+                />
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  onClick={() => setOpenBalanceDialog(true)}
+                >
+                  Пополнить
+                </Button>
+              </Box>
             </Box>
             <Box sx={{ display: 'flex', gap: 2 }}>
               <Button variant="outlined" color="info" onClick={() => navigate('/history')}>
@@ -542,8 +582,12 @@ const DashboardPage = () => {
                         <strong>Длительность:</strong> {formatDuration(session.entry_time)}
                       </Typography>
 
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        <strong>Место:</strong> {session.spot?.spot_number || 'N/A'}
+                      </Typography>
+
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        <strong>Место:</strong> {session.spot_id}
+                        <strong>Зона:</strong> {session.zone?.name || 'N/A'}
                       </Typography>
 
                       <Button
@@ -628,6 +672,16 @@ const DashboardPage = () => {
                                 Отменить
                               </Button>
                             )}
+                            {booking.status === 'confirmed' && (
+                              <Button
+                                size="small"
+                                color="success"
+                                variant="contained"
+                                onClick={() => handleConfirmEntry(booking)}
+                              >
+                                Подтвердить въезд
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -683,11 +737,11 @@ const DashboardPage = () => {
                                 <Typography variant="body2" fontWeight="bold">
                                   Место {payment.spot.spot_number}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary" display="block">
+                                <Typography variant="body2" color="text.secondary" display="block">
                                   {payment.zone.name}
                                 </Typography>
                                 {payment.booking && (
-                                  <Typography variant="caption" color="text.secondary" display="block">
+                                  <Typography variant="body2" color="text.secondary" display="block">
                                     {new Date(payment.booking.start_time).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}
                                     {' '}
                                     {new Date(payment.booking.start_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
@@ -697,7 +751,7 @@ const DashboardPage = () => {
                                 )}
                               </>
                             ) : (
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography variant="body2" color="text.secondary">
                                 {new Date(payment.created_at).toLocaleDateString('ru-RU')}
                               </Typography>
                             )}
@@ -804,8 +858,8 @@ const DashboardPage = () => {
             margin="dense"
             label="Марка"
             fullWidth
-            value={newVehicle.make}
-            onChange={(e) => setNewVehicle({ ...newVehicle, make: e.target.value })}
+            value={newVehicle.brand}
+            onChange={(e) => setNewVehicle({ ...newVehicle, brand: e.target.value })}
           />
           <TextField
             margin="dense"
@@ -978,11 +1032,41 @@ const DashboardPage = () => {
                       ) : (
                         availableSpots.map((spot) => (
                           <MenuItem key={spot.spot_id} value={spot.spot_id}>
-                            Место {spot.spot_number} ({spot.spot_type})
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                              <span>Место {spot.spot_number} ({spot.spot_type})</span>
+                              {spot.price_per_hour && (
+                                <Chip
+                                  label={`${parseFloat(spot.price_per_hour).toFixed(0)} ₽/ч`}
+                                  size="small"
+                                  color="primary"
+                                  sx={{ ml: 2 }}
+                                />
+                              )}
+                            </Box>
                           </MenuItem>
                         ))
                       )}
                     </TextField>
+
+                    {/* Show estimated cost if spot is selected */}
+                    {newBooking.spot_id && availableSpots.length > 0 && (() => {
+                      const selectedSpot = availableSpots.find(s => s.spot_id === newBooking.spot_id);
+                      if (selectedSpot && selectedSpot.price_per_hour && newBooking.start_time && newBooking.end_time) {
+                        const duration = (newBooking.end_time - newBooking.start_time) / (1000 * 60 * 60); // hours
+                        const estimatedCost = parseFloat(selectedSpot.price_per_hour) * duration;
+                        return (
+                          <Alert severity="info" sx={{ mt: 2 }}>
+                            <Typography variant="body2" fontWeight="bold">
+                              Примерная стоимость: {estimatedCost.toFixed(2)} ₽
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {duration.toFixed(1)} ч × {parseFloat(selectedSpot.price_per_hour).toFixed(0)} ₽/ч
+                            </Typography>
+                          </Alert>
+                        );
+                      }
+                      return null;
+                    })()}
                   </>
                 )
               )}
@@ -1016,6 +1100,13 @@ const DashboardPage = () => {
         onClose={handleClosePaymentDialog}
         payment={selectedPayment}
         onPaymentSuccess={handlePayment}
+      />
+
+      {/* Balance Top-Up Dialog */}
+      <BalanceTopUpDialog
+        open={openBalanceDialog}
+        onClose={() => setOpenBalanceDialog(false)}
+        onSuccess={handleBalanceTopUpSuccess}
       />
     </Container>
   );

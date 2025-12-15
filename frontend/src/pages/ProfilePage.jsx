@@ -11,6 +11,7 @@ import {
   Grid,
   Divider,
   CircularProgress,
+  Chip,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import authService from '../services/authService';
@@ -185,6 +186,18 @@ const ProfilePage = () => {
                   onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                   required
                 />
+              </Grid>
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Typography variant="body1" fontWeight="bold">
+                    Баланс:
+                  </Typography>
+                  <Chip
+                    label={`${parseFloat(user.balance || 0).toFixed(2)} ₽`}
+                    color="success"
+                    sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}
+                  />
+                </Box>
               </Grid>
               <Grid item xs={12}>
                 <Button

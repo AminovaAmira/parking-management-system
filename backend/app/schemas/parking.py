@@ -95,6 +95,24 @@ class ParkingSpotResponse(ParkingSpotBase):
         from_attributes = True
 
 
+class ParkingSpotWithPriceResponse(BaseModel):
+    """Schema for parking spot response with pricing information"""
+    spot_id: UUID
+    zone_id: UUID
+    spot_number: str
+    spot_type: str
+    is_active: bool
+    is_occupied: bool
+    created_at: datetime
+    updated_at: datetime
+    # Pricing info
+    price_per_hour: Optional[Decimal] = None
+    price_per_day: Optional[Decimal] = None
+
+    class Config:
+        from_attributes = True
+
+
 # Availability Check
 class AvailabilityRequest(BaseModel):
     """Schema for checking parking availability"""

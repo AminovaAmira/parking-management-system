@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from uuid import UUID
 from typing import Optional
+from decimal import Decimal
 
 
 class CustomerBase(BaseModel):
@@ -28,6 +29,7 @@ class CustomerResponse(CustomerBase):
     """Schema for customer response"""
     customer_id: UUID
     is_admin: bool = False
+    balance: Decimal
     created_at: datetime
     updated_at: datetime
 

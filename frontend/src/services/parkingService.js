@@ -102,7 +102,7 @@ const parkingService = {
    * @returns {Promise} Created session
    */
   startSession: async (sessionData) => {
-    const response = await apiClient.post('/api/sessions', sessionData);
+    const response = await apiClient.post('/api/sessions/', sessionData);
     return response.data;
   },
 
@@ -278,6 +278,36 @@ const parkingService = {
     const response = await apiClient.post('/api/ocr/validate', null, {
       params: { license_plate: licensePlate },
     });
+    return response.data;
+  },
+
+  // ========== Balance & Transactions ==========
+
+  /**
+   * Get current balance
+   * @returns {Promise} Balance data
+   */
+  getBalance: async () => {
+    const response = await apiClient.get('/api/balance/balance');
+    return response.data;
+  },
+
+  /**
+   * Top up balance
+   * @param {number} amount - Amount to top up
+   * @returns {Promise} Transaction data
+   */
+  topUpBalance: async (amount) => {
+    const response = await apiClient.post('/api/balance/topup', { amount });
+    return response.data;
+  },
+
+  /**
+   * Get transaction history
+   * @returns {Promise} List of transactions
+   */
+  getTransactions: async () => {
+    const response = await apiClient.get('/api/balance/transactions');
     return response.data;
   },
 };

@@ -43,9 +43,22 @@ apiClient.interceptors.response.use(
     }
 
     // Handle other errors
-    let errorMessage = 'An error occurred';
+    let errorMessage = 'Произошла ошибка';
 
-    if (error.response?.data?.detail) {
+    // Новый формат ошибок (русские сообщения)
+    if (error.response?.data?.message) {
+      errorMessage = error.response.data.message;
+
+      // Если есть дополнительные ошибки валидации
+      if (error.response.data.errors && Array.isArray(error.response.data.errors)) {
+        const validationErrors = error.response.data.errors
+          .map(err => err.message || err.field)
+          .join('; ');
+        errorMessage = validationErrors || errorMessage;
+      }
+    }
+    // Старый формат с detail (для совместимости)
+    else if (error.response?.data?.detail) {
       const detail = error.response.data.detail;
 
       // If detail is an array (validation errors from FastAPI/Pydantic)

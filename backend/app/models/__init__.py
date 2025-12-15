@@ -6,6 +6,7 @@ from app.models.parking_spot import ParkingSpot
 from app.models.booking import Booking
 from app.models.parking_session import ParkingSession
 from app.models.payment import Payment
+from app.models.transaction import Transaction
 
 __all__ = [
     "Customer",
@@ -16,4 +17,5 @@ __all__ = [
     "Booking",
     "ParkingSession",
     "Payment",
+    "Transaction",
 ]

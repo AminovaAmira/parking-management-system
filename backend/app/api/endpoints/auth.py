@@ -29,7 +29,7 @@ async def register(
     if existing_customer:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="Пользователь с таким email уже зарегистрирован"
         )
 
     # Create new customer
@@ -65,7 +65,7 @@ async def login(
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Неверный email или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -73,7 +73,7 @@ async def login(
     if not verify_password(login_data.password, customer.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Неверный email или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -131,14 +131,14 @@ async def change_password(
     if not verify_password(password_data.current_password, current_customer.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect"
+            detail="Неверный текущий пароль"
         )
 
     # Check that new password is different
     if password_data.current_password == password_data.new_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be different from current password"
+            detail="Новый пароль должен отличаться от текущего"
         )
 
     # Update password
@@ -146,4 +146,4 @@ async def change_password(
 
     await db.commit()
 
-    return {"message": "Password changed successfully"}
+    return {"message": "Пароль успешно изменен"}

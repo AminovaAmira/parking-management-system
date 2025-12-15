@@ -12,9 +12,12 @@ class ParkingSessionBase(BaseModel):
     entry_time: datetime
 
 
-class ParkingSessionCreate(ParkingSessionBase):
+class ParkingSessionCreate(BaseModel):
     """Schema for creating a parking session"""
+    vehicle_id: UUID
+    spot_id: UUID
     booking_id: Optional[UUID] = None
+    entry_time: Optional[datetime] = None  # Auto-set to current time if not provided
 
 
 class ParkingSessionEnd(BaseModel):
@@ -94,6 +97,19 @@ class ParkingSessionHistoryResponse(BaseModel):
     zone: SessionZoneDetail
     vehicle: SessionVehicleDetail
     payment: Optional[SessionPaymentDetail]
+
+    class Config:
+        from_attributes = True
+
+
+class ActiveSessionDetailResponse(BaseModel):
+    """Detailed schema for active parking session"""
+    session_id: UUID
+    entry_time: datetime
+    status: str
+    spot: SessionSpotDetail
+    zone: SessionZoneDetail
+    vehicle: SessionVehicleDetail
 
     class Config:
         from_attributes = True

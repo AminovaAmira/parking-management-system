@@ -14,11 +14,13 @@ from app.models.booking import Booking
 from app.models.parking_zone import ParkingZone
 from app.models.tariff_plan import TariffPlan
 from app.models.payment import Payment
+from app.models.transaction import Transaction
 from app.schemas.session import (
     ParkingSessionCreate,
     ParkingSessionResponse,
     ParkingSessionEnd,
     ParkingSessionHistoryResponse,
+    ActiveSessionDetailResponse,
     SessionSpotDetail,
     SessionZoneDetail,
     SessionVehicleDetail,
@@ -151,6 +153,7 @@ async def start_parking_session(
         )
 
     # If booking_id provided, verify it exists and belongs to this customer
+    booking = None
     if session_data.booking_id:
         stmt = select(Booking).where(
             Booking.booking_id == session_data.booking_id,
@@ -164,18 +167,66 @@ async def start_parking_session(
         if not booking:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found or does not match session parameters"
+                detail="Бронирование не найдено или не соответствует параметрам сессии"
             )
 
-        if booking.status != "confirmed":
+        # Check if booking time is valid (current time should be within booking period)
+        current_time = datetime.utcnow()
+        if current_time < booking.start_time:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Booking must be confirmed to start a session"
+                detail="Время бронирования ещё не началось"
+            )
+
+        if current_time > booking.end_time:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Время бронирования уже истекло"
+            )
+
+        # If booking is pending, deduct from balance and confirm it
+        if booking.status == "pending":
+            # Check if customer has sufficient balance
+            if current_customer.balance < booking.estimated_cost:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Недостаточно средств на балансе. Требуется: {booking.estimated_cost} ₽, Доступно: {current_customer.balance} ₽"
+                )
+
+            # Deduct from balance
+            balance_before = current_customer.balance
+            balance_after = balance_before - booking.estimated_cost
+            current_customer.balance = balance_after
+
+            # Create transaction record
+            new_transaction = Transaction(
+                customer_id=current_customer.customer_id,
+                booking_id=booking.booking_id,
+                amount=booking.estimated_cost,
+                type="booking_charge",
+                description=f"Списание за бронирование места на парковке",
+                balance_before=balance_before,
+                balance_after=balance_after
+            )
+            db.add(new_transaction)
+
+            # Confirm booking
+            booking.status = "confirmed"
+
+        elif booking.status != "confirmed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Бронирование должно быть в статусе 'pending' или 'confirmed' для начала сессии"
             )
 
     # Create parking session
+    session_dict = session_data.model_dump()
+    # Auto-set entry_time to current time if not provided
+    if not session_dict.get('entry_time'):
+        session_dict['entry_time'] = datetime.utcnow()
+
     new_session = ParkingSession(
-        **session_data.model_dump(),
+        **session_dict,
         status="active"
     )
 
@@ -207,12 +258,12 @@ async def start_parking_session(
     return new_session
 
 
-@router.get("/active", response_model=List[ParkingSessionResponse])
+@router.get("/active", response_model=List[ActiveSessionDetailResponse])
 async def get_active_sessions(
     current_customer: Customer = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all active parking sessions for current customer"""
+    """Get all active parking sessions for current customer with details"""
 
     # Get customer's vehicle IDs
     vehicles_stmt = select(Vehicle.vehicle_id).where(Vehicle.customer_id == current_customer.customer_id)
@@ -230,7 +281,60 @@ async def get_active_sessions(
 
     result = await db.execute(stmt)
     sessions = result.scalars().all()
-    return sessions
+
+    # Build detailed response
+    detailed_sessions = []
+    for session in sessions:
+        # Get spot
+        spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == session.spot_id)
+        spot_result = await db.execute(spot_stmt)
+        spot = spot_result.scalar_one_or_none()
+
+        if not spot:
+            continue
+
+        # Get zone
+        zone_stmt = select(ParkingZone).where(ParkingZone.zone_id == spot.zone_id)
+        zone_result = await db.execute(zone_stmt)
+        zone = zone_result.scalar_one_or_none()
+
+        if not zone:
+            continue
+
+        # Get vehicle
+        vehicle_stmt = select(Vehicle).where(Vehicle.vehicle_id == session.vehicle_id)
+        vehicle_result = await db.execute(vehicle_stmt)
+        vehicle = vehicle_result.scalar_one_or_none()
+
+        if not vehicle:
+            continue
+
+        # Build detailed session
+        detailed_session = ActiveSessionDetailResponse(
+            session_id=session.session_id,
+            entry_time=session.entry_time,
+            status=session.status,
+            spot=SessionSpotDetail(
+                spot_id=spot.spot_id,
+                spot_number=spot.spot_number,
+                spot_type=spot.spot_type
+            ),
+            zone=SessionZoneDetail(
+                zone_id=zone.zone_id,
+                name=zone.name,
+                address=zone.address
+            ),
+            vehicle=SessionVehicleDetail(
+                vehicle_id=vehicle.vehicle_id,
+                license_plate=vehicle.license_plate,
+                model=vehicle.model,
+                color=vehicle.color
+            )
+        )
+
+        detailed_sessions.append(detailed_session)
+
+    return detailed_sessions
 
 
 @router.get("/{session_id}", response_model=ParkingSessionResponse)
@@ -340,22 +444,69 @@ async def end_parking_session(
         if zone:
             zone.available_spots = min(zone.total_spots, zone.available_spots + 1)
 
-    # Auto-create payment for the session
-    # Check if payment already exists
-    payment_stmt = select(Payment).where(Payment.session_id == session.session_id)
-    payment_result = await db.execute(payment_stmt)
-    existing_payment = payment_result.scalar_one_or_none()
+    # Handle refund or penalty if session was from a booking
+    if session.booking_id:
+        # Get the booking
+        booking_stmt = select(Booking).where(Booking.booking_id == session.booking_id)
+        booking_result = await db.execute(booking_stmt)
+        booking = booking_result.scalar_one_or_none()
 
-    if not existing_payment and session.total_cost > 0:
-        # Create payment record
-        new_payment = Payment(
-            session_id=session.session_id,
-            customer_id=current_customer.customer_id,
-            amount=session.total_cost,
-            payment_method="pending",  # User will choose method later
-            status="pending"
-        )
-        db.add(new_payment)
+        if booking:
+            estimated_cost = booking.estimated_cost
+            actual_cost = session.total_cost
+
+            # Calculate difference
+            difference = estimated_cost - actual_cost
+
+            if difference > 0:
+                # Refund: actual cost was less than estimated
+                balance_before = current_customer.balance
+                balance_after = balance_before + difference
+                current_customer.balance = balance_after
+
+                # Create refund transaction
+                refund_transaction = Transaction(
+                    customer_id=current_customer.customer_id,
+                    booking_id=booking.booking_id,
+                    session_id=session.session_id,
+                    amount=difference,
+                    type="refund",
+                    description=f"Возврат средств: парковка завершена раньше",
+                    balance_before=balance_before,
+                    balance_after=balance_after
+                )
+                db.add(refund_transaction)
+
+            elif difference < 0:
+                # Penalty: actual cost was more than estimated (stayed longer)
+                penalty = abs(difference)
+
+                # Check if customer has sufficient balance
+                if current_customer.balance < penalty:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Недостаточно средств для оплаты штрафа. Требуется: {penalty} ₽, Доступно: {current_customer.balance} ₽"
+                    )
+
+                balance_before = current_customer.balance
+                balance_after = balance_before - penalty
+                current_customer.balance = balance_after
+
+                # Create penalty transaction
+                penalty_transaction = Transaction(
+                    customer_id=current_customer.customer_id,
+                    booking_id=booking.booking_id,
+                    session_id=session.session_id,
+                    amount=penalty,
+                    type="penalty",
+                    description=f"Штраф: превышено время бронирования",
+                    balance_before=balance_before,
+                    balance_after=balance_after
+                )
+                db.add(penalty_transaction)
+
+            # Mark booking as completed
+            booking.status = "completed"
 
     await db.commit()
     await db.refresh(session)
