@@ -14,6 +14,7 @@ from app.models.parking_spot import ParkingSpot
 from app.models.parking_zone import ParkingZone
 from app.models.payment import Payment
 from app.models.tariff_plan import TariffPlan
+from app.models.transaction import Transaction
 from app.schemas.booking import (
     BookingCreate,
     BookingResponse,
@@ -25,6 +26,7 @@ from app.schemas.booking import (
 )
 from app.core.dependencies import get_current_customer
 from app.services.notification_service import notification_service
+from decimal import Decimal
 
 router = APIRouter()
 
@@ -194,15 +196,54 @@ async def create_booking(
         # Default rate if no tariff
         estimated_cost = 50.0 * duration_hours
 
-    # Create booking with estimated cost
+    estimated_cost = Decimal(str(round(estimated_cost, 2)))
+
+    # Check if customer has sufficient balance
+    if current_customer.balance < estimated_cost:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Недостаточно средств на балансе. Требуется: {estimated_cost} ₽, Доступно: {current_customer.balance} ₽. Пожалуйста, пополните баланс."
+        )
+
+    # Deduct from balance
+    balance_before = current_customer.balance
+    balance_after = balance_before - estimated_cost
+    current_customer.balance = balance_after
+
+    # Create booking with estimated cost and status 'confirmed'
     new_booking = Booking(
         customer_id=current_customer.customer_id,
         **booking_data.model_dump(),
-        estimated_cost=round(estimated_cost, 2),
-        status="pending"
+        estimated_cost=estimated_cost,
+        status="confirmed"  # Сразу подтверждаем, так как деньги уже списаны
     )
 
     db.add(new_booking)
+    await db.flush()  # Get booking_id before creating payment
+
+    # Create transaction record
+    new_transaction = Transaction(
+        customer_id=current_customer.customer_id,
+        booking_id=new_booking.booking_id,
+        amount=estimated_cost,
+        type="booking_charge",
+        description=f"Оплата бронирования: {zone.name}, место {spot.spot_number}",
+        balance_before=balance_before,
+        balance_after=balance_after
+    )
+    db.add(new_transaction)
+
+    # Create payment record
+    new_payment = Payment(
+        customer_id=current_customer.customer_id,
+        booking_id=new_booking.booking_id,
+        amount=estimated_cost,
+        payment_method="balance",
+        status="completed",
+        transaction_id=str(new_transaction.transaction_id)
+    )
+    db.add(new_payment)
+
     await db.commit()
     await db.refresh(new_booking)
 

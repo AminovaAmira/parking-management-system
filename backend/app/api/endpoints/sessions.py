@@ -184,39 +184,11 @@ async def start_parking_session(
                 detail="Время бронирования уже истекло"
             )
 
-        # If booking is pending, deduct from balance and confirm it
-        if booking.status == "pending":
-            # Check if customer has sufficient balance
-            if current_customer.balance < booking.estimated_cost:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Недостаточно средств на балансе. Требуется: {booking.estimated_cost} ₽, Доступно: {current_customer.balance} ₽"
-                )
-
-            # Deduct from balance
-            balance_before = current_customer.balance
-            balance_after = balance_before - booking.estimated_cost
-            current_customer.balance = balance_after
-
-            # Create transaction record
-            new_transaction = Transaction(
-                customer_id=current_customer.customer_id,
-                booking_id=booking.booking_id,
-                amount=booking.estimated_cost,
-                type="booking_charge",
-                description=f"Списание за бронирование места на парковке",
-                balance_before=balance_before,
-                balance_after=balance_after
-            )
-            db.add(new_transaction)
-
-            # Confirm booking
-            booking.status = "confirmed"
-
-        elif booking.status != "confirmed":
+        # Check booking status - it should already be confirmed (payment was made during booking creation)
+        if booking.status != "confirmed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Бронирование должно быть в статусе 'pending' или 'confirmed' для начала сессии"
+                detail="Бронирование должно быть подтверждено и оплачено для начала сессии"
             )
 
     # Create parking session
@@ -507,6 +479,50 @@ async def end_parking_session(
 
             # Mark booking as completed
             booking.status = "completed"
+
+            # Update existing payment to link it with session
+            payment_stmt = select(Payment).where(Payment.booking_id == booking.booking_id)
+            payment_result = await db.execute(payment_stmt)
+            payment = payment_result.scalar_one_or_none()
+            if payment:
+                payment.session_id = session.session_id
+                payment.amount = actual_cost  # Update to actual cost
+    else:
+        # Session without booking - create payment and deduct from balance
+        # Check if customer has sufficient balance
+        if current_customer.balance < session.total_cost:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Недостаточно средств на балансе. Требуется: {session.total_cost} ₽, Доступно: {current_customer.balance} ₽"
+            )
+
+        # Deduct from balance
+        balance_before = current_customer.balance
+        balance_after = balance_before - session.total_cost
+        current_customer.balance = balance_after
+
+        # Create transaction record
+        new_transaction = Transaction(
+            customer_id=current_customer.customer_id,
+            session_id=session.session_id,
+            amount=session.total_cost,
+            type="parking_charge",
+            description=f"Оплата парковки без бронирования",
+            balance_before=balance_before,
+            balance_after=balance_after
+        )
+        db.add(new_transaction)
+
+        # Create payment record
+        new_payment = Payment(
+            customer_id=current_customer.customer_id,
+            session_id=session.session_id,
+            amount=session.total_cost,
+            payment_method="balance",
+            status="completed",
+            transaction_id=str(new_transaction.transaction_id)
+        )
+        db.add(new_payment)
 
     await db.commit()
     await db.refresh(session)

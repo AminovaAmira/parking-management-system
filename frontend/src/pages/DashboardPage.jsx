@@ -941,6 +941,11 @@ const DashboardPage = () => {
               : 'Выберите время, затем выберите место на плане парковки.'}
           </Alert>
 
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>Важно:</strong> При создании бронирования стоимость будет сразу списана с вашего баланса.
+            После завершения парковки неиспользованные средства будут возвращены, либо будет списана доплата за превышение времени.
+          </Alert>
+
           <TextField
             margin="dense"
             label="Выберите автомобиль"
@@ -1065,12 +1070,15 @@ const DashboardPage = () => {
                         const duration = (newBooking.end_time - newBooking.start_time) / (1000 * 60 * 60); // hours
                         const estimatedCost = parseFloat(selectedSpot.price_per_hour) * duration;
                         return (
-                          <Alert severity="info" sx={{ mt: 2 }}>
+                          <Alert severity="success" sx={{ mt: 2 }}>
                             <Typography variant="body2" fontWeight="bold">
                               Примерная стоимость: {estimatedCost.toFixed(2)} ₽
                             </Typography>
                             <Typography variant="caption" color="text.secondary" display="block">
                               {duration.toFixed(1)} ч × {parseFloat(selectedSpot.price_per_hour).toFixed(0)} ₽/ч
+                            </Typography>
+                            <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                              💰 Эта сумма будет списана с вашего баланса ({parseFloat(user.balance || 0).toFixed(2)} ₽) при подтверждении бронирования.
                             </Typography>
                           </Alert>
                         );
