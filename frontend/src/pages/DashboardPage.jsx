@@ -154,12 +154,27 @@ const DashboardPage = () => {
   };
 
   const handleCancelBooking = async (bookingId) => {
-    if (window.confirm('Отменить бронирование?')) {
+    if (window.confirm('Отменить бронирование? Средства будут возвращены на ваш баланс.')) {
       try {
+        // Find booking to get refund amount
+        const booking = bookings.find(b => b.booking_id === bookingId);
+        const refundAmount = booking ? parseFloat(booking.estimated_cost) : 0;
+
         await parkingService.cancelBooking(bookingId);
+
+        // Immediately update balance optimistically
+        if (refundAmount > 0) {
+          const newBalance = parseFloat(user.balance) + refundAmount;
+          await updateUser({ ...user, balance: newBalance.toFixed(2) });
+        }
+
         await loadDashboardData();
+        // Sync with server to ensure consistency
+        await updateUser();
       } catch (err) {
         setError(err.message || 'Ошибка отмены бронирования');
+        // Revert optimistic update on error
+        await updateUser();
       }
     }
   };
@@ -233,6 +248,14 @@ const DashboardPage = () => {
         return;
       }
 
+      // Calculate estimated cost locally for optimistic update
+      const selectedSpot = availableSpots.find(s => s.spot_id === newBooking.spot_id);
+      let estimatedCost = 0;
+      if (selectedSpot && selectedSpot.price_per_hour) {
+        const duration = (newBooking.end_time - newBooking.start_time) / (1000 * 60 * 60);
+        estimatedCost = parseFloat(selectedSpot.price_per_hour) * duration;
+      }
+
       // Convert dayjs to ISO string for API
       const bookingData = {
         vehicle_id: newBooking.vehicle_id,
@@ -241,7 +264,13 @@ const DashboardPage = () => {
         end_time: newBooking.end_time.toISOString(),
       };
 
-      await parkingService.createBooking(bookingData);
+      // Create booking on backend
+      const createdBooking = await parkingService.createBooking(bookingData);
+
+      // Immediately update balance optimistically with actual cost from backend
+      const newBalance = parseFloat(user.balance) - parseFloat(createdBooking.estimated_cost || estimatedCost);
+      await updateUser({ ...user, balance: newBalance.toFixed(2) });
+
       setOpenBookingDialog(false);
       setNewBooking({
         spot_id: '',
@@ -251,9 +280,15 @@ const DashboardPage = () => {
       });
       setSelectedZone('');
       setAvailableSpots([]);
+
+      // Refresh data from server in background
       await loadDashboardData();
+      // Then sync user from server to ensure consistency
+      await updateUser();
     } catch (err) {
       setError(err.message || 'Ошибка создания бронирования');
+      // If error occurred, refresh user data to revert optimistic update
+      await updateUser();
     }
   };
 
@@ -262,7 +297,14 @@ const DashboardPage = () => {
       try {
         const exitTime = new Date().toISOString();
         await parkingService.endSession(sessionId, { exit_time: exitTime });
+        // Обновляем баланс пользователя после возврата/штрафа
+        // Сначала обновим с сервера
+        await updateUser();
         await loadDashboardData();
+        // Второй раз обновим для гарантии
+        setTimeout(async () => {
+          await updateUser();
+        }, 500);
       } catch (err) {
         setError(err.message || 'Ошибка завершения сессии');
       }

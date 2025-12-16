@@ -4,7 +4,8 @@
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timedelta
+from sqlalchemy import select
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 from app.models.vehicle import Vehicle
@@ -14,6 +15,8 @@ from app.models.parking_session import ParkingSession
 from app.models.booking import Booking
 from app.models.tariff_plan import TariffPlan
 from app.models.payment import Payment
+from app.models.transaction import Transaction
+from app.models.customer import Customer
 
 
 @pytest.fixture
@@ -582,3 +585,209 @@ async def test_session_cost_calculation(
 
     # Стоимость должна быть 3 часа * 100 руб/час = 300 руб
     assert cost == Decimal("300.00")
+
+
+@pytest.mark.asyncio
+async def test_end_session_with_booking_refund(
+    client: AsyncClient,
+    auth_headers,
+    test_vehicle_for_session,
+    test_spot_with_zone,
+    test_customer,
+    db_session: AsyncSession
+):
+    """Test ending session with booking - should refund if finished early"""
+    # Set initial balance and create booking with estimated cost
+    initial_balance = Decimal("1000.00")
+    estimated_cost = Decimal("200.00")  # For 2 hours
+    test_customer.balance = initial_balance - estimated_cost  # 800.00
+    await db_session.commit()
+
+    # Create booking for 2 hours
+    start_time = datetime.now(dt_timezone.utc) - timedelta(hours=1)
+    end_time = start_time + timedelta(hours=2)
+
+    booking = Booking(
+        customer_id=test_customer.customer_id,
+        vehicle_id=test_vehicle_for_session.vehicle_id,
+        spot_id=test_spot_with_zone.spot_id,
+        start_time=start_time,
+        end_time=end_time,
+        estimated_cost=estimated_cost,
+        status="confirmed"
+    )
+    db_session.add(booking)
+    await db_session.commit()
+    await db_session.refresh(booking)
+
+    # Create session linked to booking
+    entry_time = start_time
+    session = ParkingSession(
+        booking_id=booking.booking_id,
+        vehicle_id=test_vehicle_for_session.vehicle_id,
+        spot_id=test_spot_with_zone.spot_id,
+        entry_time=entry_time,
+        status="active"
+    )
+    test_spot_with_zone.is_occupied = True
+    db_session.add(session)
+    await db_session.commit()
+    await db_session.refresh(session)
+
+    # End session after 1 hour (early) - actual cost should be 100.00
+    exit_time = entry_time + timedelta(hours=1)
+    response = await client.patch(
+        f"/api/sessions/{session.session_id}/end",
+        headers=auth_headers,
+        json={"exit_time": exit_time.isoformat()}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert float(data["total_cost"]) == 100.00  # Actual cost
+
+    # Check balance was refunded (200 - 100 = 100 refund)
+    await db_session.refresh(test_customer)
+    expected_balance = initial_balance - Decimal("100.00")  # 900.00
+    assert test_customer.balance == expected_balance
+
+    # Check refund transaction was created
+    refund_stmt = select(Transaction).where(
+        Transaction.booking_id == booking.booking_id,
+        Transaction.type == "refund"
+    )
+    refund_result = await db_session.execute(refund_stmt)
+    refund = refund_result.scalar_one()
+    assert refund.amount == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_end_session_with_booking_penalty(
+    client: AsyncClient,
+    auth_headers,
+    test_vehicle_for_session,
+    test_spot_with_zone,
+    test_customer,
+    db_session: AsyncSession
+):
+    """Test ending session with booking - should charge penalty if exceeded time"""
+    # Set initial balance and create booking with estimated cost
+    initial_balance = Decimal("1000.00")
+    estimated_cost = Decimal("100.00")  # For 1 hour
+    test_customer.balance = initial_balance - estimated_cost  # 900.00
+    await db_session.commit()
+
+    # Create booking for 1 hour
+    start_time = datetime.now(dt_timezone.utc) - timedelta(hours=2)
+    end_time = start_time + timedelta(hours=1)
+
+    booking = Booking(
+        customer_id=test_customer.customer_id,
+        vehicle_id=test_vehicle_for_session.vehicle_id,
+        spot_id=test_spot_with_zone.spot_id,
+        start_time=start_time,
+        end_time=end_time,
+        estimated_cost=estimated_cost,
+        status="confirmed"
+    )
+    db_session.add(booking)
+    await db_session.commit()
+    await db_session.refresh(booking)
+
+    # Create session
+    entry_time = start_time
+    session = ParkingSession(
+        booking_id=booking.booking_id,
+        vehicle_id=test_vehicle_for_session.vehicle_id,
+        spot_id=test_spot_with_zone.spot_id,
+        entry_time=entry_time,
+        status="active"
+    )
+    test_spot_with_zone.is_occupied = True
+    db_session.add(session)
+    await db_session.commit()
+    await db_session.refresh(session)
+
+    # End session after 2 hours (overtime) - actual cost should be 200.00
+    exit_time = entry_time + timedelta(hours=2)
+    response = await client.patch(
+        f"/api/sessions/{session.session_id}/end",
+        headers=auth_headers,
+        json={"exit_time": exit_time.isoformat()}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert float(data["total_cost"]) == 200.00  # Actual cost
+
+    # Check penalty was charged (200 - 100 = 100 penalty)
+    await db_session.refresh(test_customer)
+    expected_balance = initial_balance - Decimal("200.00")  # 800.00
+    assert test_customer.balance == expected_balance
+
+    # Check penalty transaction was created
+    penalty_stmt = select(Transaction).where(
+        Transaction.booking_id == booking.booking_id,
+        Transaction.type == "penalty"
+    )
+    penalty_result = await db_session.execute(penalty_stmt)
+    penalty = penalty_result.scalar_one()
+    assert penalty.amount == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_end_session_without_booking(
+    client: AsyncClient,
+    auth_headers,
+    test_vehicle_for_session,
+    test_spot_with_zone,
+    test_customer,
+    db_session: AsyncSession
+):
+    """Test ending session without booking - should charge from balance"""
+    # Set initial balance
+    initial_balance = Decimal("1000.00")
+    test_customer.balance = initial_balance
+    await db_session.commit()
+
+    # Create session without booking
+    entry_time = datetime.now(dt_timezone.utc) - timedelta(hours=2)
+    session = ParkingSession(
+        vehicle_id=test_vehicle_for_session.vehicle_id,
+        spot_id=test_spot_with_zone.spot_id,
+        entry_time=entry_time,
+        status="active"
+    )
+    test_spot_with_zone.is_occupied = True
+    db_session.add(session)
+    await db_session.commit()
+    await db_session.refresh(session)
+
+    # End session after 2 hours - cost should be 200.00
+    exit_time = entry_time + timedelta(hours=2)
+    response = await client.patch(
+        f"/api/sessions/{session.session_id}/end",
+        headers=auth_headers,
+        json={"exit_time": exit_time.isoformat()}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert float(data["total_cost"]) == 200.00
+
+    # Check balance was charged
+    await db_session.refresh(test_customer)
+    expected_balance = initial_balance - Decimal("200.00")  # 800.00
+    assert test_customer.balance == expected_balance
+
+    # Check parking_charge transaction was created
+    charge_stmt = select(Transaction).where(
+        Transaction.session_id == session.session_id,
+        Transaction.type == "parking_charge"
+    )
+    charge_result = await db_session.execute(charge_stmt)
+    charge = charge_result.scalar_one()
+    assert charge.amount == Decimal("200.00")

@@ -210,12 +210,12 @@ async def create_booking(
     balance_after = balance_before - estimated_cost
     current_customer.balance = balance_after
 
-    # Create booking with estimated cost and status 'confirmed'
+    # Create booking with estimated cost and status 'pending' (money is deducted, but session not started yet)
     new_booking = Booking(
         customer_id=current_customer.customer_id,
         **booking_data.model_dump(),
         estimated_cost=estimated_cost,
-        status="confirmed"  # Сразу подтверждаем, так как деньги уже списаны
+        status="pending"  # Оплачено, но парковка еще не началась
     )
 
     db.add(new_booking)
@@ -232,6 +232,7 @@ async def create_booking(
         balance_after=balance_after
     )
     db.add(new_transaction)
+    await db.flush()  # Flush to get transaction_id
 
     # Create payment record
     new_payment = Payment(
@@ -240,7 +241,7 @@ async def create_booking(
         amount=estimated_cost,
         payment_method="balance",
         status="completed",
-        transaction_id=str(new_transaction.transaction_id)
+        transaction_id=str(new_transaction.transaction_id) if new_transaction.transaction_id else None
     )
     db.add(new_payment)
 
@@ -327,7 +328,7 @@ async def cancel_booking(
     current_customer: Customer = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
-    """Cancel a booking"""
+    """Cancel a booking and refund the payment"""
     stmt = select(Booking).where(
         Booking.booking_id == booking_id,
         Booking.customer_id == current_customer.customer_id
@@ -347,6 +348,31 @@ async def cancel_booking(
             detail="Cannot cancel completed booking"
         )
 
+    if booking.status == "cancelled":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Booking is already cancelled"
+        )
+
+    # Return money to balance
+    refund_amount = booking.estimated_cost
+    balance_before = current_customer.balance
+    balance_after = balance_before + refund_amount
+    current_customer.balance = balance_after
+
+    # Create refund transaction
+    refund_transaction = Transaction(
+        customer_id=current_customer.customer_id,
+        booking_id=booking.booking_id,
+        amount=refund_amount,
+        type="refund",
+        description=f"Возврат средств за отмененное бронирование",
+        balance_before=balance_before,
+        balance_after=balance_after
+    )
+    db.add(refund_transaction)
+
+    # Update booking status
     booking.status = "cancelled"
 
     await db.commit()

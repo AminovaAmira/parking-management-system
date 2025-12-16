@@ -4,12 +4,17 @@ Tests for booking endpoints
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timedelta
+from sqlalchemy import select
+from datetime import datetime, timedelta, timezone as dt_timezone
+from decimal import Decimal
 
 from app.models.vehicle import Vehicle
 from app.models.parking_zone import ParkingZone
 from app.models.parking_spot import ParkingSpot
 from app.models.booking import Booking
+from app.models.payment import Payment
+from app.models.transaction import Transaction
+from app.models.customer import Customer
 
 
 @pytest.fixture
@@ -66,10 +71,16 @@ async def test_create_booking_success(
     client: AsyncClient,
     auth_headers,
     test_vehicle,
-    test_spot
+    test_spot,
+    db_session: AsyncSession,
+    test_customer
 ):
-    """Test creating a booking successfully"""
-    start_time = datetime.utcnow() + timedelta(hours=1)
+    """Test creating a booking successfully with balance deduction"""
+    # Set initial balance
+    test_customer.balance = Decimal("1000.00")
+    await db_session.commit()
+
+    start_time = datetime.now(dt_timezone.utc) + timedelta(hours=1)
     end_time = start_time + timedelta(hours=2)
 
     response = await client.post(
@@ -88,6 +99,25 @@ async def test_create_booking_success(
     assert data["status"] == "pending"
     assert data["vehicle_id"] == str(test_vehicle.vehicle_id)
     assert data["spot_id"] == str(test_spot.spot_id)
+    assert "estimated_cost" in data
+
+    # Check balance was deducted
+    await db_session.refresh(test_customer)
+    assert test_customer.balance < Decimal("1000.00")
+
+    # Check payment was created
+    payment_stmt = select(Payment).where(Payment.booking_id == data["booking_id"])
+    payment_result = await db_session.execute(payment_stmt)
+    payment = payment_result.scalar_one()
+    assert payment.status == "completed"
+    assert payment.payment_method == "balance"
+
+    # Check transaction was created
+    transaction_stmt = select(Transaction).where(Transaction.booking_id == data["booking_id"])
+    transaction_result = await db_session.execute(transaction_stmt)
+    transaction = transaction_result.scalar_one()
+    assert transaction.type == "booking_charge"
+    assert transaction.amount == data["estimated_cost"]
 
 
 @pytest.mark.asyncio
@@ -389,8 +419,14 @@ async def test_cancel_booking(
     db_session: AsyncSession,
     test_customer
 ):
-    """Test cancelling a booking"""
-    start_time = datetime.utcnow() + timedelta(hours=1)
+    """Test cancelling a booking with refund"""
+    # Set initial balance and estimated cost
+    initial_balance = Decimal("500.00")
+    estimated_cost = Decimal("100.00")
+    test_customer.balance = initial_balance - estimated_cost  # 400.00
+    await db_session.commit()
+
+    start_time = datetime.now(dt_timezone.utc) + timedelta(hours=1)
     end_time = start_time + timedelta(hours=2)
 
     booking = Booking(
@@ -399,6 +435,7 @@ async def test_cancel_booking(
         spot_id=test_spot.spot_id,
         start_time=start_time,
         end_time=end_time,
+        estimated_cost=estimated_cost,
         status="pending"
     )
     db_session.add(booking)
@@ -411,6 +448,19 @@ async def test_cancel_booking(
     )
 
     assert response.status_code == 204
+
+    # Check balance was refunded
+    await db_session.refresh(test_customer)
+    assert test_customer.balance == initial_balance  # 500.00
+
+    # Check refund transaction was created
+    refund_stmt = select(Transaction).where(
+        Transaction.booking_id == booking.booking_id,
+        Transaction.type == "refund"
+    )
+    refund_result = await db_session.execute(refund_stmt)
+    refund = refund_result.scalar_one()
+    assert refund.amount == estimated_cost
 
 
 @pytest.mark.asyncio
@@ -452,3 +502,70 @@ async def test_booking_unauthorized(client: AsyncClient):
     """Test booking endpoints without authentication"""
     response = await client.get("/api/bookings/")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_booking_insufficient_balance(
+    client: AsyncClient,
+    auth_headers,
+    test_vehicle,
+    test_spot,
+    db_session: AsyncSession,
+    test_customer
+):
+    """Test creating a booking with insufficient balance"""
+    # Set low balance
+    test_customer.balance = Decimal("10.00")
+    await db_session.commit()
+
+    start_time = datetime.now(dt_timezone.utc) + timedelta(hours=1)
+    end_time = start_time + timedelta(hours=2)  # 2 hours - will cost more than 10
+
+    response = await client.post(
+        "/api/bookings/",
+        headers=auth_headers,
+        json={
+            "vehicle_id": str(test_vehicle.vehicle_id),
+            "spot_id": str(test_spot.spot_id),
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat()
+        }
+    )
+
+    assert response.status_code == 400
+    assert "Недостаточно средств" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_already_cancelled_booking(
+    client: AsyncClient,
+    auth_headers,
+    test_vehicle,
+    test_spot,
+    db_session: AsyncSession,
+    test_customer
+):
+    """Test that already cancelled bookings cannot be cancelled again"""
+    start_time = datetime.now(dt_timezone.utc) + timedelta(hours=1)
+    end_time = start_time + timedelta(hours=2)
+
+    booking = Booking(
+        customer_id=test_customer.customer_id,
+        vehicle_id=test_vehicle.vehicle_id,
+        spot_id=test_spot.spot_id,
+        start_time=start_time,
+        end_time=end_time,
+        estimated_cost=Decimal("100.00"),
+        status="cancelled"
+    )
+    db_session.add(booking)
+    await db_session.commit()
+    await db_session.refresh(booking)
+
+    response = await client.delete(
+        f"/api/bookings/{booking.booking_id}",
+        headers=auth_headers
+    )
+
+    assert response.status_code == 400
+    assert "already cancelled" in response.json()["detail"]

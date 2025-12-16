@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.db.database import get_db
 from app.models.customer import Customer
@@ -171,11 +171,15 @@ async def start_parking_session(
             )
 
         # Check if booking time is valid (current time should be within booking period)
+        # Allow starting 5 minutes before scheduled time
         current_time = datetime.now(timezone.utc)
-        if current_time < booking.start_time:
+        booking_start_with_buffer = booking.start_time - timedelta(minutes=5)
+
+        if current_time < booking_start_with_buffer:
+            minutes_until_start = int((booking.start_time - current_time).total_seconds() / 60)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Время бронирования ещё не началось"
+                detail=f"Слишком рано! Можно начать парковку за 5 минут до времени бронирования. Осталось ждать: {minutes_until_start} мин"
             )
 
         if current_time > booking.end_time:
@@ -184,12 +188,22 @@ async def start_parking_session(
                 detail="Время бронирования уже истекло"
             )
 
-        # Check booking status - it should already be confirmed (payment was made during booking creation)
-        if booking.status != "confirmed":
+        # Check booking status - should be 'pending' (payment was made, waiting for session start)
+        if booking.status == "cancelled":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Бронирование должно быть подтверждено и оплачено для начала сессии"
+                detail="Нельзя начать сессию для отмененного бронирования"
             )
+
+        if booking.status == "completed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Это бронирование уже было использовано"
+            )
+
+        # Change booking status to 'confirmed' when session starts
+        if booking.status == "pending":
+            booking.status = "confirmed"
 
     # Create parking session
     session_dict = session_data.model_dump()
@@ -512,6 +526,7 @@ async def end_parking_session(
             balance_after=balance_after
         )
         db.add(new_transaction)
+        await db.flush()  # Flush to get transaction_id
 
         # Create payment record
         new_payment = Payment(
@@ -520,7 +535,7 @@ async def end_parking_session(
             amount=session.total_cost,
             payment_method="balance",
             status="completed",
-            transaction_id=str(new_transaction.transaction_id)
+            transaction_id=str(new_transaction.transaction_id) if new_transaction.transaction_id else None
         )
         db.add(new_payment)
 
