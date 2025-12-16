@@ -473,6 +473,7 @@ function AdminPage() {
                     <TableRow>
                       <TableCell>ID</TableCell>
                       <TableCell>Клиент</TableCell>
+                      <TableCell>Место</TableCell>
                       <TableCell>Время начала</TableCell>
                       <TableCell>Время окончания</TableCell>
                       <TableCell>Статус</TableCell>
@@ -482,7 +483,8 @@ function AdminPage() {
                     {bookings.map((booking) => (
                       <TableRow key={booking.booking_id}>
                         <TableCell>{booking.booking_id.substring(0, 8)}</TableCell>
-                        <TableCell>{booking.customer_id.substring(0, 8)}</TableCell>
+                        <TableCell>{booking.customer_name || booking.customer_id.substring(0, 8)}</TableCell>
+                        <TableCell>{booking.spot_number || booking.spot_id.substring(0, 8)}</TableCell>
                         <TableCell>{new Date(booking.start_time).toLocaleString()}</TableCell>
                         <TableCell>{new Date(booking.end_time).toLocaleString()}</TableCell>
                         <TableCell>

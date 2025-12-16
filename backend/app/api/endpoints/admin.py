@@ -317,8 +317,34 @@ async def get_all_bookings(
         count_stmt = count_stmt.where(Booking.status == status)
     total = (await db.execute(count_stmt)).scalar()
 
+    # Получить информацию о клиентах и местах для каждого бронирования
+    bookings_with_details = []
+    for booking in bookings:
+        # Получить клиента
+        customer_stmt = select(Customer).where(Customer.customer_id == booking.customer_id)
+        customer_result = await db.execute(customer_stmt)
+        customer = customer_result.scalar_one_or_none()
+
+        # Получить место
+        spot_stmt = select(ParkingSpot).where(ParkingSpot.spot_id == booking.spot_id)
+        spot_result = await db.execute(spot_stmt)
+        spot = spot_result.scalar_one_or_none()
+
+        bookings_with_details.append({
+            "booking_id": str(booking.booking_id),
+            "customer_id": str(booking.customer_id),
+            "customer_name": f"{customer.first_name} {customer.last_name}" if customer else "Неизвестно",
+            "spot_id": str(booking.spot_id),
+            "spot_number": spot.spot_number if spot else "Неизвестно",
+            "start_time": booking.start_time,
+            "end_time": booking.end_time,
+            "status": booking.status,
+            "estimated_cost": float(booking.estimated_cost) if booking.estimated_cost else None,
+            "created_at": booking.created_at
+        })
+
     return {
-        "bookings": bookings,
+        "bookings": bookings_with_details,
         "total": total,
         "skip": skip,
         "limit": limit
