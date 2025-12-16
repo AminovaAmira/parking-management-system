@@ -85,13 +85,61 @@ async def clear_test_data(db: AsyncSession):
 
 
 async def create_customers(db: AsyncSession, count: int = 18):
-    """Создание тестовых пользователей"""
+    """Создание тестовых пользователей (включая админа и Амиру)"""
     print(f"\n👥 Создание {count} пользователей...")
 
     customers = []
     used_emails = set()
 
-    for i in range(count):
+    # 1. Создаём или находим админа
+    admin_stmt = select(Customer).where(Customer.email == "admin@parking.com")
+    admin_result = await db.execute(admin_stmt)
+    admin = admin_result.scalar_one_or_none()
+
+    if not admin:
+        admin = Customer(
+            customer_id=uuid.uuid4(),
+            first_name="Admin",
+            last_name="Parking",
+            email="admin@parking.com",
+            phone="+7 (999) 000-00-00",
+            password_hash=get_password_hash("admin123"),
+            is_admin=True,
+            balance=Decimal("10000.00")  # У админа большой баланс
+        )
+        db.add(admin)
+        await db.flush()
+        print("✅ Создан админ: admin@parking.com / admin123")
+    else:
+        print("ℹ️  Админ уже существует")
+
+    # 2. Создаём Амиру
+    amira_stmt = select(Customer).where(Customer.email == "amira@test.com")
+    amira_result = await db.execute(amira_stmt)
+    amira = amira_result.scalar_one_or_none()
+
+    if not amira:
+        amira = Customer(
+            customer_id=uuid.uuid4(),
+            first_name="Амира",
+            last_name="Аминова",
+            email="amira@test.com",
+            phone="+7 (999) 111-22-33",
+            password_hash=get_password_hash("amira123"),
+            is_admin=False,
+            balance=Decimal("5000.00")  # Начальный баланс
+        )
+        db.add(amira)
+        customers.append(amira)
+        used_emails.add("amira@test.com")
+        print("✅ Создана Амира: amira@test.com / amira123")
+    else:
+        customers.append(amira)
+        used_emails.add("amira@test.com")
+        print("ℹ️  Амира уже существует")
+
+    # 3. Создаём остальных пользователей
+    for i in range(count - 1):  # -1 потому что Амира уже создана
         first_name = random.choice(FIRST_NAMES)
         last_name = random.choice(LAST_NAMES)
 
@@ -104,6 +152,9 @@ async def create_customers(db: AsyncSession, count: int = 18):
             counter += 1
         used_emails.add(email)
 
+        # Случайный баланс от 0 до 3000 рублей
+        balance = Decimal(str(random.randint(0, 3000)))
+
         customer = Customer(
             customer_id=uuid.uuid4(),
             first_name=first_name,
@@ -111,7 +162,8 @@ async def create_customers(db: AsyncSession, count: int = 18):
             email=email,
             phone=generate_phone(),
             password_hash=get_password_hash("password123"),
-            is_admin=False
+            is_admin=False,
+            balance=balance
         )
         db.add(customer)
         customers.append(customer)
@@ -122,7 +174,7 @@ async def create_customers(db: AsyncSession, count: int = 18):
     for customer in customers:
         await db.refresh(customer)
 
-    print(f"✅ Создано {len(customers)} пользователей")
+    print(f"✅ Создано {len(customers)} обычных пользователей (+ админ)")
     return customers
 
 
@@ -169,8 +221,8 @@ async def create_vehicles(db: AsyncSession, customers: list):
 
 
 async def create_bookings_and_payments(db: AsyncSession, vehicles: list, zones: list, spots: list):
-    """Создание бронирований и платежей: 3 недели вперед"""
-    print("\n📅 Создание бронирований на 3 недели вперед...")
+    """Создание бронирований и платежей: 3 недели назад + 1 неделя вперёд"""
+    print("\n📅 Создание бронирований (3 недели назад + 1 неделя вперёд)...")
 
     total_spots = len(spots)
     now = datetime.utcnow()
@@ -195,15 +247,20 @@ async def create_bookings_and_payments(db: AsyncSession, vehicles: list, zones: 
     bookings = []
     payments = []
 
-    # Бронирования: последние 3 недели (21 день назад до сегодня)
-    for day_offset in range(-20, 1):  # -20 to 0 (20 дней назад до сегодня)
+    # Бронирования: от -20 дней (прошлое) до +7 дней (будущее)
+    for day_offset in range(-20, 8):  # -20 to 7 (20 дней назад до 7 дней вперёд)
         day_date = now + timedelta(days=day_offset)
 
-        # Определяем заполненность: первые 1.5 недели (-20 до -10 дней) - 75%, остальные (-9 до 0 дней) - 45%
+        # Определяем заполненность:
+        # - Прошлое (первые 1.5 недели): 75%
+        # - Прошлое (остальное): 45%
+        # - Будущее (неделя вперёд): 55%
         if day_offset < -9:  # дни от -20 до -10
             occupancy_rate = 0.75
-        else:  # дни от -9 до 0
+        elif day_offset <= 0:  # дни от -9 до 0
             occupancy_rate = 0.45
+        else:  # дни от 1 до 7 (будущее)
+            occupancy_rate = 0.55
 
         bookings_today = int(total_spots * occupancy_rate)
 
@@ -243,17 +300,18 @@ async def create_bookings_and_payments(db: AsyncSession, vehicles: list, zones: 
             if booking_status == "confirmed":
                 # Для прошлых бронирований - все платежи completed
                 # Для текущих - 90% completed, 10% pending
+                # Для будущих - все платежи pending (оплачены заранее)
                 if end_time < now:
                     # Прошлые бронирования - все оплачены
                     payment_status = "completed"
                     create_payment = True
                 elif start_time <= now < end_time:
-                    # Текущие активные бронирования
+                    # Текущие активные бронирования - 90% оплачены
                     payment_status = random.choices(["completed", "pending"], weights=[0.9, 0.1])[0]
                     create_payment = True
                 else:
-                    # Будущие бронирования (не должно быть при нашем диапазоне)
-                    create_payment = False
+                    # Будущие бронирования - все pending (оплата прошла, но сессия ещё не началась)
+                    create_payment = True
                     payment_status = "pending"
 
                 if create_payment:
