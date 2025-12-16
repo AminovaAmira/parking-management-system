@@ -397,15 +397,20 @@ async def end_parking_session(
             detail="Session is not active"
         )
 
+    # Ensure exit_time is timezone-aware
+    exit_time = session_end.exit_time
+    if exit_time.tzinfo is None:
+        exit_time = exit_time.replace(tzinfo=timezone.utc)
+
     # Validate exit time
-    if session_end.exit_time < session.entry_time:
+    if exit_time < session.entry_time:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Exit time must be after entry time"
         )
 
     # Update session
-    session.exit_time = session_end.exit_time
+    session.exit_time = exit_time
     session.status = "completed"
 
     # Calculate duration in minutes

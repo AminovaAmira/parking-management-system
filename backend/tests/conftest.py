@@ -18,7 +18,7 @@ from app.core.security import get_password_hash
 import os
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://parking_user:parking_password@db:5432/parking_test"
+    "postgresql+asyncpg://parking_user:parking_pass_2024@db:5432/parking_test"
 )
 
 
