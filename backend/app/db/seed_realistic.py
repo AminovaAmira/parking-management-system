@@ -111,7 +111,11 @@ async def create_customers(db: AsyncSession, count: int = 18):
         await db.flush()
         print("✅ Создан админ: admin@parking.com / admin123")
     else:
-        print("ℹ️  Админ уже существует")
+        # Обновляем баланс существующего админа
+        admin.balance = Decimal("10000.00")
+        admin.is_admin = True  # На всякий случай
+        await db.flush()
+        print("✅ Обновлен админ: admin@parking.com (баланс установлен на 10000₽)")
 
     # 2. Создаём Амиру
     amira_stmt = select(Customer).where(Customer.email == "amira@test.com")
@@ -134,9 +138,12 @@ async def create_customers(db: AsyncSession, count: int = 18):
         used_emails.add("amira@test.com")
         print("✅ Создана Амира: amira@test.com / amira123")
     else:
+        # Обновляем баланс существующей Амиры
+        amira.balance = Decimal("5000.00")
+        await db.flush()
         customers.append(amira)
         used_emails.add("amira@test.com")
-        print("ℹ️  Амира уже существует")
+        print("✅ Обновлена Амира: amira@test.com (баланс установлен на 5000₽)")
 
     # 3. Создаём остальных пользователей
     for i in range(count - 1):  # -1 потому что Амира уже создана
